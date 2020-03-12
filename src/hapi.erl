@@ -22,11 +22,6 @@
 -define(TCP_SEND_TIMEOUT, timer:seconds(5)).
 -define(REQ_TIMEOUT, timer:seconds(30)).
 -define(RETRY_TIMEOUT, timer:seconds(1)).
--define(is_gun_error_msg(Pid, Msg),
-        (is_tuple(Msg) andalso tuple_size(Msg) > 2
-         andalso element(2, Msg) == Pid
-         andalso (element(1, Msg) == gun_down orelse
-                  element(1, Msg) == gun_error))).
 
 -type uri() :: {http, http_uri:user_info(),
                 http_uri:host(), inet:port_number(),
@@ -139,15 +134,18 @@ req(Req, [{Addr, Family}|Addrs], Port, Time, Reason) ->
                                         transport_opts => transport_opts(Family),
                                         retry => 0}) of
                 {ok, ConnPid} ->
+                    MRef = erlang:monitor(process, ConnPid),
                     Ret = receive
                               {gun_up, ConnPid, _Protocol} ->
-                                  req(Req, ConnPid, Time);
-                              Msg when ?is_gun_error_msg(ConnPid, Msg) ->
-                                  {error, {http, closed}}
+                                  req(Req, ConnPid, MRef, Time);
+                              {'DOWN', MRef, process, ConnPid, Why} ->
+                                  {error, prep_reason(Why)}
                           after Timeout ->
-                                  close(ConnPid),
+                                  gun:close(ConnPid),
                                   {error, {http, timeout}}
                           end,
+                    erlang:demonitor(MRef),
+                    gun:flush(ConnPid),
                     case Ret of
                         {ok, _} = OK ->
                             OK;
@@ -163,9 +161,9 @@ req(Req, [{Addr, Family}|Addrs], Port, Time, Reason) ->
 req(_, [], _, _, Reason) ->
     {error, Reason}.
 
--spec req(req(), pid(), millisecs()) ->
+-spec req(req(), pid(), reference(), millisecs()) ->
           {ok, http_reply()} | {error, {http, inet_error_reason()}}.
-req(Req, ConnPid, Time) ->
+req(Req, ConnPid, MRef, Time) ->
     Timeout = timeout(Time),
     StreamRef = case Req of
                     {get, Path, Hdrs} ->
@@ -177,34 +175,29 @@ req(Req, ConnPid, Time) ->
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->
             {ok, {Status, Headers, <<>>}};
         {gun_response, ConnPid, StreamRef, nofin, Status, Headers} ->
-            recv_data(ConnPid, StreamRef, Time, Status, Headers, <<>>);
-        Msg when ?is_gun_error_msg(ConnPid, Msg) ->
-            {error, {http, closed}}
+            recv_data(ConnPid, MRef, StreamRef, Time, Status, Headers, <<>>);
+        {'DOWN', MRef, process, ConnPid, Why} ->
+            {error, prep_reason(Why)}
     after Timeout ->
-            close(ConnPid),
+            gun:close(ConnPid),
             {error, {http, timeout}}
     end.
 
--spec recv_data(pid(), reference(), millisecs(), non_neg_integer(), headers(), binary()) ->
+-spec recv_data(pid(), reference(), reference(), millisecs(), non_neg_integer(), headers(), binary()) ->
           {ok, http_reply()} | {error, {http, inet_error_reason()}}.
-recv_data(ConnPid, StreamRef, Time, Status, Headers, Buf) ->
+recv_data(ConnPid, MRef, StreamRef, Time, Status, Headers, Buf) ->
     Timeout = timeout(Time),
     receive
         {gun_data, ConnPid, StreamRef, nofin, Data} ->
-            recv_data(ConnPid, StreamRef, Time, Status, Headers, <<Buf/binary, Data/binary>>);
+            recv_data(ConnPid, MRef, StreamRef, Time, Status, Headers, <<Buf/binary, Data/binary>>);
         {gun_data, ConnPid, StreamRef, fin, Data} ->
             {ok, {Status, Headers, <<Buf/binary, Data/binary>>}};
-        Msg when ?is_gun_error_msg(ConnPid, Msg) ->
-            {error, {http, closed}}
+        {'DOWN', MRef, process, ConnPid, Why} ->
+            {error, prep_reason(Why)}
     after Timeout ->
-            close(ConnPid),
+            gun:close(ConnPid),
             {error, {http, timeout}}
     end.
-
--spec close(pid()) -> ok.
-close(ConnPid) ->
-    gun:close(ConnPid),
-    gun:flush(ConnPid).
 
 -spec need_retry({ok, http_reply()} | {error, error_reason()}) -> boolean().
 need_retry({ok, {Status, _, _}}) when Status < 500; Status >= 600 ->
@@ -290,6 +283,12 @@ format_addr({_, _, _, _, _, _, _, _} = IPv6) ->
 -spec format(io:format(), list()) -> string().
 format(Fmt, Args) ->
     lists:flatten(io_lib:format(Fmt, Args)).
+
+-spec prep_reason(term()) -> error_reason().
+prep_reason({shutdown, Reason}) ->
+    {http, Reason};
+prep_reason(Reason) ->
+    {system_error, Reason}.
 
 %%%-------------------------------------------------------------------
 %%% Aux
