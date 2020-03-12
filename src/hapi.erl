@@ -55,11 +55,15 @@ start() ->
 stop() ->
     application:stop(?MODULE).
 
--spec get(uri()) -> {ok, http_reply()} | {error, error_reason()}.
+-spec get(uri() | [uri()]) -> {ok, http_reply()} | {error, error_reason()}.
 get(URI) ->
     get(URI, #{}).
 
--spec get(uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+-spec get([uri()], req_opts()) -> [{ok, http_reply()} | {error, error_reason()}];
+         (uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+get(URIs, Opts) when is_list(URIs) ->
+    Timeout = maps:get(timeout, Opts, ?REQ_TIMEOUT),
+    parallel_eval(get, URIs, [Opts], Timeout);
 get({http, _UserInfo, Host, Port, Path, _Query}, Opts) ->
     Timeout = maps:get(timeout, Opts, ?REQ_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
@@ -305,3 +309,35 @@ transport_opts(Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},
      {send_timeout_close, true},
      Family].
+
+parallel_eval(Fun, URIs, Args, Timeout) ->
+    Self = self(),
+    Pids = lists:map(
+             fun(URI) ->
+                     spawn_monitor(
+                       fun() ->
+                               Self ! {self(), apply(?MODULE, Fun, [URI|Args])}
+                       end)
+             end, URIs),
+    collect_responses(Pids, current_time() + Timeout, []).
+
+collect_responses([], _, Acc) ->
+    lists:reverse(Acc);
+collect_responses([{Pid, MRef}|Pids], Time, Acc) ->
+    Timeout = timeout(Time),
+    Response = receive
+                   {Pid, Ret} ->
+                       erlang:demonitor(MRef, [flush]),
+                       Ret;
+                   {'DOWN', MRef, process, Pid, Reason} ->
+                       {error, {system_error, Reason}}
+               after Timeout ->
+                       exit(Pid, kill),
+                       erlang:demonitor(MRef, [flush]),
+                       receive
+                           {Pid, Ret} -> Ret
+                       after 0 ->
+                               {error, {http, timeout}}
+                       end
+               end,
+    collect_responses(Pids, Time, [Response|Acc]).
