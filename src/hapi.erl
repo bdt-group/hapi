@@ -263,9 +263,9 @@ get_addr_family(_) -> erlang:error(badarg).
 %%%-------------------------------------------------------------------
 -spec format_inet_error(inet_error_reason()) -> string().
 format_inet_error(closed) ->
-    "connection closed";
+    "connection closed unexpectedly";
 format_inet_error(timeout) ->
-    format_inet_error(etimedout);
+    "request timed out";
 format_inet_error(Reason) when is_atom(Reason) ->
     case inet:format_error(Reason) of
 	"unknown POSIX error" -> atom_to_list(Reason);
