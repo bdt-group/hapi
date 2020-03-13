@@ -32,7 +32,8 @@
 -type host_family() :: {http_uri:host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type headers() :: [{binary(), binary()}].
--type req() :: {get, http_uri:path(), headers()} | {post, http_uri:path(), headers(), iodata()}.
+-type req() :: {get, http_uri:path(), http_uri:query(), headers()} |
+               {post, http_uri:path(), http_uri:query(), headers(), iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type millisecs() :: integer().
 -type inet_error_reason() :: timeout | closed | inet:posix() | term().
@@ -63,20 +64,20 @@ get(URI) ->
          (uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
 get(URIs, Opts) when is_list(URIs) ->
     parallel_eval(get, URIs, [Opts]);
-get({http, _UserInfo, Host, Port, Path, _Query}, Opts) ->
+get({http, _UserInfo, Host, Port, Path, Query}, Opts) ->
     Timeout = maps:get(timeout, Opts, ?REQ_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
     Time = current_time() + Timeout,
     Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
             {<<"connection">>, <<"close">>}],
-    req({get, Path, Hdrs}, Host, Families, Port, Time, 1).
+    req({get, Path, Query, Hdrs}, Host, Families, Port, Time, 1).
 
 -spec post(uri(), iodata()) -> {ok, http_reply()} | {error, error_reason()}.
 post(URI, Body) ->
     post(URI, Body, #{}).
 
 -spec post(uri(), iodata(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
-post({http, _UserInfo, Host, Port, Path, _Query}, Body, Opts) ->
+post({http, _UserInfo, Host, Port, Path, Query}, Body, Opts) ->
     Timeout = maps:get(timeout, Opts, ?REQ_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
     ContentType = maps:get(content_type, Opts, ?DEFAULT_CONTENT_TYPE),
@@ -84,7 +85,7 @@ post({http, _UserInfo, Host, Port, Path, _Query}, Body, Opts) ->
             {<<"connection">>, <<"close">>},
             {<<"content-type">>, ContentType}],
     Time = current_time() + Timeout,
-    req({post, Path, Hdrs, Body}, Host, Families, Port, Time, 1).
+    req({post, Path, Query, Hdrs, Body}, Host, Families, Port, Time, 1).
 
 -spec format_error(error_reason()) -> string().
 format_error({dns, Reason}) ->
@@ -169,10 +170,10 @@ req(_, [], _, _, Reason) ->
 req(Req, ConnPid, MRef, Time) ->
     Timeout = timeout(Time),
     StreamRef = case Req of
-                    {get, Path, Hdrs} ->
-                        gun:get(ConnPid, Path, Hdrs);
-                    {post, Path, Hdrs, Body} ->
-                        gun:post(ConnPid, Path, Hdrs, Body)
+                    {get, Path, Query, Hdrs} ->
+                        gun:get(ConnPid, Path ++ Query, Hdrs);
+                    {post, Path, Query, Hdrs, Body} ->
+                        gun:post(ConnPid, Path ++ Query, Hdrs, Body)
                 end,
     receive
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->
