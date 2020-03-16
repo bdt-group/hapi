@@ -1,6 +1,5 @@
 %%%-------------------------------------------------------------------
 %%% @author Evgeny Khramtsov <ekhramtsov@bdt.group>
-%%% @copyright (C) 2020, Evgeny Khramtsov
 %%% @doc
 %%%
 %%% @end
