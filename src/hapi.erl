@@ -217,7 +217,7 @@ need_retry(_) ->
 lookup(Host, Families, Time) ->
     case inet:parse_address(Host) of
         {ok, IP} ->
-            {ok, [{Host, IP, get_addr_family(IP)}]};
+            {ok, [{IP, get_addr_family(IP)}]};
         {error, _} ->
             Addrs = [{Host, Family} || Family <- lists:reverse(Families)],
             lookup(Addrs, Time, [], nxdomain)
