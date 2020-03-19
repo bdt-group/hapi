@@ -10,7 +10,7 @@
 %% API
 -export([start/0, stop/0]).
 -export([get/1, get/2]).
--export([post/2, post/3]).
+-export([post/1, post/2, post/3]).
 -export([format_error/1]).
 
 -include_lib("kernel/include/inet.hrl").
@@ -71,7 +71,20 @@ get({http, _UserInfo, Host, Port, Path, Query}, Opts) ->
             {<<"connection">>, <<"close">>}],
     req({get, Path, Query, Hdrs}, Host, Families, Port, Time, 1).
 
--spec post(uri(), iodata()) -> {ok, http_reply()} | {error, error_reason()}.
+-spec post([{uri(), iodata()}]) -> [{ok, http_reply()} | {error, error_reason()}];
+          ({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
+post(URIs) when is_list(URIs) ->
+    post(URIs, #{});
+post({URI, Body}) ->
+    post(URI, Body, #{}).
+
+-spec post(uri(), iodata()) -> {ok, http_reply()} | {error, error_reason()};
+          ({uri(), iodata()}, req_opts()) -> {ok, http_reply()} | {error, error_reason()};
+          ([{uri(), iodata()}], req_opts()) -> [{ok, http_reply()} | {error, error_reason()}].
+post(URIs, Opts) when is_list(URIs) ->
+    parallel_eval(post, URIs, [Opts]);
+post({URI, Body}, Opts) ->
+    post(URI, Body, Opts);
 post(URI, Body) ->
     post(URI, Body, #{}).
 
