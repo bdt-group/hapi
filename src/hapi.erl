@@ -12,6 +12,7 @@
 -export([get/1, get/2]).
 -export([post/1, post/2, post/3]).
 -export([format_error/1]).
+-export([proxy_status/1]).
 
 -include_lib("kernel/include/inet.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -40,7 +41,7 @@
                         {http, inet_error_reason()} |
                         {system_error, term()}.
 
--export_type([uri/0]).
+-export_type([uri/0, error_reason/0, http_reply/0]).
 
 %%%===================================================================
 %%% API
@@ -106,6 +107,13 @@ format_error({http, Reason}) ->
     format("HTTP request failed: ~s", [format_inet_error(Reason)]);
 format_error({system_error, Reason}) ->
     format("Internal system error: ~p", [Reason]).
+
+-spec proxy_status(http_reply() | error_reason()) -> non_neg_integer().
+proxy_status({Status, _Headers, _Body}) -> Status;
+proxy_status({system_error, _}) -> 500;
+proxy_status({_, timeout}) -> 504;
+proxy_status({_, etimedout}) -> 504;
+proxy_status(_) -> 502.
 
 %%%===================================================================
 %%% Internal functions
