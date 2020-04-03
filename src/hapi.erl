@@ -26,8 +26,9 @@
 -type uri() :: {http, http_uri:user_info(),
                 http_uri:host(), inet:port_number(),
                 http_uri:path(), http_uri:query()}.
--type req_opts() :: #{timeout => millisecs(),
+-type req_opts() :: #{timeout => millisecs() | {abs, millisecs()},
                       content_type => binary(),
+                      headers => headers(),
                       ip_family => [inet | inet6,...]}.
 -type host_family() :: {http_uri:host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
@@ -65,11 +66,14 @@ get(URI) ->
 get(URIs, Opts) when is_list(URIs) ->
     parallel_eval(get, URIs, [Opts]);
 get({http, _UserInfo, Host, Port, Path, Query}, Opts) ->
-    Timeout = maps:get(timeout, Opts, ?REQ_TIMEOUT),
+    Time = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
+               {abs, DeadLine} -> DeadLine;
+               Timeout -> current_time() + Timeout
+           end,
     Families = maps:get(ip_family, Opts, [inet]),
-    Time = current_time() + Timeout,
     Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
-            {<<"connection">>, <<"close">>}],
+            {<<"connection">>, <<"close">>}|
+            maps:get(headers, Opts, [])],
     req({get, Path, Query, Hdrs}, Host, Families, Port, Time, 1).
 
 -spec post([{uri(), iodata()}]) -> [{ok, http_reply()} | {error, error_reason()}];
@@ -91,13 +95,16 @@ post(URI, Body) ->
 
 -spec post(uri(), iodata(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
 post({http, _UserInfo, Host, Port, Path, Query}, Body, Opts) ->
-    Timeout = maps:get(timeout, Opts, ?REQ_TIMEOUT),
+    Time = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
+               {abs, DeadLine} -> DeadLine;
+               Timeout -> current_time() + Timeout
+           end,
     Families = maps:get(ip_family, Opts, [inet]),
     ContentType = maps:get(content_type, Opts, ?DEFAULT_CONTENT_TYPE),
     Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
             {<<"connection">>, <<"close">>},
-            {<<"content-type">>, ContentType}],
-    Time = current_time() + Timeout,
+            {<<"content-type">>, ContentType}|
+            maps:get(headers, Opts, [])],
     req({post, Path, Query, Hdrs, Body}, Host, Families, Port, Time, 1).
 
 -spec format_error(error_reason()) -> string().
