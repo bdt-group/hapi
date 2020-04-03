@@ -66,15 +66,15 @@ get(URI) ->
 get(URIs, Opts) when is_list(URIs) ->
     parallel_eval(get, URIs, [Opts]);
 get({http, _UserInfo, Host, Port, Path, Query}, Opts) ->
-    Time = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
-               {abs, DeadLine} -> DeadLine;
+    DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
+               {abs, AbsTime} -> AbsTime;
                Timeout -> current_time() + Timeout
            end,
     Families = maps:get(ip_family, Opts, [inet]),
     Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
             {<<"connection">>, <<"close">>}|
             maps:get(headers, Opts, [])],
-    req({get, Path, Query, Hdrs}, Host, Families, Port, Time, 1).
+    req({get, Path, Query, Hdrs}, Host, Families, Port, DeadLine, 1).
 
 -spec post([{uri(), iodata()}]) -> [{ok, http_reply()} | {error, error_reason()}];
           ({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
@@ -95,8 +95,8 @@ post(URI, Body) ->
 
 -spec post(uri(), iodata(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
 post({http, _UserInfo, Host, Port, Path, Query}, Body, Opts) ->
-    Time = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
-               {abs, DeadLine} -> DeadLine;
+    DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
+               {abs, AbsTime} -> AbsTime;
                Timeout -> current_time() + Timeout
            end,
     Families = maps:get(ip_family, Opts, [inet]),
@@ -105,7 +105,7 @@ post({http, _UserInfo, Host, Port, Path, Query}, Body, Opts) ->
             {<<"connection">>, <<"close">>},
             {<<"content-type">>, ContentType}|
             maps:get(headers, Opts, [])],
-    req({post, Path, Query, Hdrs, Body}, Host, Families, Port, Time, 1).
+    req({post, Path, Query, Hdrs, Body}, Host, Families, Port, DeadLine, 1).
 
 -spec format_error(error_reason()) -> string().
 format_error({dns, Reason}) ->
@@ -128,26 +128,26 @@ proxy_status(_) -> 502.
 -spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
           millisecs(), pos_integer()) ->
           {ok, http_reply()} | {error, error_reason()}.
-req(Req, Host, Families, Port, Time, Retries) ->
-    case lookup(Host, Families, Time) of
+req(Req, Host, Families, Port, DeadLine, Retries) ->
+    case lookup(Host, Families, DeadLine) of
         {ok, Addrs} ->
-            Ret = req(Req, Addrs, Port, Time, {http, timeout}),
-            retry_req(Req, Host, Families, Port, Time, Retries, Ret);
+            Ret = req(Req, Addrs, Port, DeadLine, {http, timeout}),
+            retry_req(Req, Host, Families, Port, DeadLine, Retries, Ret);
         {error, _} = Ret ->
-            retry_req(Req, Host, Families, Port, Time, Retries, Ret)
+            retry_req(Req, Host, Families, Port, DeadLine, Retries, Ret)
     end.
 
 -spec retry_req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
                 millisecs(), pos_integer(), {ok, http_reply()} | {error, error_reason()}) ->
           {ok, http_reply()} | {error, error_reason()}.
-retry_req(Req, Host, Families, Port, Time, Retries, Ret) ->
+retry_req(Req, Host, Families, Port, DeadLine, Retries, Ret) ->
     case need_retry(Ret) of
         true ->
             Timeout = Retries * ?RETRY_TIMEOUT,
-            case (current_time() + Timeout) < Time of
+            case (current_time() + Timeout) < DeadLine of
                 true ->
                     timer:sleep(Timeout),
-                    req(Req, Host, Families, Port, Time, Retries+1);
+                    req(Req, Host, Families, Port, DeadLine, Retries+1);
                 false ->
                     Ret
             end;
@@ -157,8 +157,8 @@ retry_req(Req, Host, Families, Port, Time, Retries, Ret) ->
 
 -spec req(req(), [addr_family()], inet:port_number(), millisecs(), error_reason()) ->
           {ok, http_reply()} | {error, error_reason()}.
-req(Req, [{Addr, Family}|Addrs], Port, Time, Reason) ->
-    case timeout(Time) of
+req(Req, [{Addr, Family}|Addrs], Port, DeadLine, Reason) ->
+    case timeout(DeadLine) of
         Timeout when Timeout > 0 ->
             ?LOG_DEBUG("Performing GET to http://~s:~B", [format_addr(Addr), Port]),
             case gun:open(Addr, Port, #{transport => tcp,
@@ -168,7 +168,7 @@ req(Req, [{Addr, Family}|Addrs], Port, Time, Reason) ->
                     MRef = erlang:monitor(process, ConnPid),
                     Ret = receive
                               {gun_up, ConnPid, _Protocol} ->
-                                  req(Req, ConnPid, MRef, Time);
+                                  req(Req, ConnPid, MRef, DeadLine);
                               {'DOWN', MRef, process, ConnPid, Why} ->
                                   {error, prep_reason(Why)}
                           after Timeout ->
@@ -181,10 +181,10 @@ req(Req, [{Addr, Family}|Addrs], Port, Time, Reason) ->
                         {ok, _} = OK ->
                             OK;
                         {error, NewReason} ->
-                            req(Req, Addrs, Port, Time, NewReason)
+                            req(Req, Addrs, Port, DeadLine, NewReason)
                     end;
                 {error, Why} ->
-                    req(Req, Addrs, Port, Time, {system_error, Why})
+                    req(Req, Addrs, Port, DeadLine, {system_error, Why})
             end;
         _ ->
             {error, Reason}
@@ -194,8 +194,8 @@ req(_, [], _, _, Reason) ->
 
 -spec req(req(), pid(), reference(), millisecs()) ->
           {ok, http_reply()} | {error, {http, inet_error_reason()}}.
-req(Req, ConnPid, MRef, Time) ->
-    Timeout = timeout(Time),
+req(Req, ConnPid, MRef, DeadLine) ->
+    Timeout = timeout(DeadLine),
     StreamRef = case Req of
                     {get, Path, Query, Hdrs} ->
                         gun:get(ConnPid, Path ++ Query, Hdrs);
@@ -206,7 +206,7 @@ req(Req, ConnPid, MRef, Time) ->
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->
             {ok, {Status, Headers, <<>>}};
         {gun_response, ConnPid, StreamRef, nofin, Status, Headers} ->
-            recv_data(ConnPid, MRef, StreamRef, Time, Status, Headers, <<>>);
+            recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, <<>>);
         {'DOWN', MRef, process, ConnPid, Why} ->
             {error, prep_reason(Why)}
     after Timeout ->
@@ -216,11 +216,11 @@ req(Req, ConnPid, MRef, Time) ->
 
 -spec recv_data(pid(), reference(), reference(), millisecs(), non_neg_integer(), headers(), binary()) ->
           {ok, http_reply()} | {error, {http, inet_error_reason()}}.
-recv_data(ConnPid, MRef, StreamRef, Time, Status, Headers, Buf) ->
-    Timeout = timeout(Time),
+recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, Buf) ->
+    Timeout = timeout(DeadLine),
     receive
         {gun_data, ConnPid, StreamRef, nofin, Data} ->
-            recv_data(ConnPid, MRef, StreamRef, Time, Status, Headers, <<Buf/binary, Data/binary>>);
+            recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, <<Buf/binary, Data/binary>>);
         {gun_data, ConnPid, StreamRef, fin, Data} ->
             {ok, {Status, Headers, <<Buf/binary, Data/binary>>}};
         {'DOWN', MRef, process, ConnPid, Why} ->
@@ -241,32 +241,32 @@ need_retry(_) ->
 %%%-------------------------------------------------------------------
 -spec lookup(http_uri:host(), [inet | inet6, ...], millisecs()) ->
           {ok, [addr_family(), ...]} | {error, {dns, inet_error_reason()}}.
-lookup(Host, Families, Time) ->
+lookup(Host, Families, DeadLine) ->
     case inet:parse_address(Host) of
         {ok, IP} ->
             {ok, [{IP, get_addr_family(IP)}]};
         {error, _} ->
             Addrs = [{Host, Family} || Family <- lists:reverse(Families)],
-            lookup(Addrs, Time, [], nxdomain)
+            lookup(Addrs, DeadLine, [], nxdomain)
     end.
 
 -spec lookup([host_family()], millisecs(), [addr_family()], inet_error_reason()) ->
           {ok, [addr_family(),...]} | {error, {dns, inet_error_reason()}}.
-lookup([{Host, Family}|Addrs], Time, Res, Err) ->
-    Timeout = min(?DNS_TIMEOUT, timeout(Time)),
+lookup([{Host, Family}|Addrs], DeadLine, Res, Err) ->
+    Timeout = min(?DNS_TIMEOUT, timeout(DeadLine)),
     ?LOG_DEBUG("Looking up ~s address for ~ts",
                [format_family(Family), Host]),
     case inet:gethostbyname(Host, Family, Timeout) of
         {ok, HostEntry} ->
             Addrs1 = host_entry_to_addrs(HostEntry),
             Addrs2 = [{Addr, Family} || Addr <- Addrs1],
-            lookup(Addrs, Time, Addrs2 ++ Res, Err);
+            lookup(Addrs, DeadLine, Addrs2 ++ Res, Err);
         {error, Why} ->
-            lookup(Addrs, Time, Res, Why)
+            lookup(Addrs, DeadLine, Res, Why)
     end;
-lookup([], _Timeout, [], Err) ->
+lookup([], _DeadLine, [], Err) ->
     {error, {dns, Err}};
-lookup([], _Timeout, Res, _Err) ->
+lookup([], _DeadLine, Res, _Err) ->
     {ok, Res}.
 
 -spec host_entry_to_addrs(inet:hostent()) -> [inet:ip_address()].
@@ -329,8 +329,8 @@ current_time() ->
     erlang:monotonic_time(millisecond).
 
 -spec timeout(millisecs()) -> non_neg_integer().
-timeout(Time) ->
-    max(0, Time - current_time()).
+timeout(DeadLine) ->
+    max(0, DeadLine - current_time()).
 
 transport_opts(Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},
