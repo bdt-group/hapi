@@ -36,7 +36,7 @@
 -type req() :: {get, http_uri:path(), http_uri:query(), headers()} |
                {post, http_uri:path(), http_uri:query(), headers(), iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
--type millisecs() :: integer().
+-type millisecs() :: non_neg_integer().
 -type inet_error_reason() :: timeout | closed | inet:posix() | term().
 -type error_reason() :: {dns, inet_error_reason()} |
                         {http, inet_error_reason()} |
@@ -326,7 +326,7 @@ prep_reason(Reason) ->
 %%%-------------------------------------------------------------------
 -spec current_time() -> millisecs().
 current_time() ->
-    erlang:monotonic_time(millisecond).
+    erlang:system_time(millisecond).
 
 -spec timeout(millisecs()) -> non_neg_integer().
 timeout(DeadLine) ->
