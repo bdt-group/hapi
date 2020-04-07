@@ -5,10 +5,10 @@
   {applications,
    [kernel,
     stdlib,
-    gun
+    gun,
+    inets
    ]},
   {env,[]},
   {modules, []},
-  {included_applications, [inets]},
   {links, []}
  ]}.
