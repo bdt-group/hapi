@@ -29,7 +29,7 @@
 -type req_opts() :: #{timeout => millisecs() | {abs, millisecs()},
                       content_type => binary(),
                       headers => headers(),
-                      ip_family => [inet | inet6,...]}.
+                      ip_family => [inet | inet6, ...]}.
 -type host_family() :: {http_uri:host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type headers() :: [{binary(), binary()}].
@@ -54,6 +54,7 @@ start() ->
         {error, _} = Err -> Err
     end.
 
+-spec stop() -> ok | {error, term()}.
 stop() ->
     application:stop(?MODULE).
 
@@ -251,7 +252,7 @@ lookup(Host, Families, DeadLine) ->
     end.
 
 -spec lookup([host_family()], millisecs(), [addr_family()], inet_error_reason()) ->
-          {ok, [addr_family(),...]} | {error, {dns, inet_error_reason()}}.
+          {ok, [addr_family(), ...]} | {error, {dns, inet_error_reason()}}.
 lookup([{Host, Family}|Addrs], DeadLine, Res, Err) ->
     Timeout = min(?DNS_TIMEOUT, timeout(DeadLine)),
     ?LOG_DEBUG("Looking up ~s address for ~ts",
@@ -295,8 +296,8 @@ format_inet_error(timeout) ->
     "request timed out";
 format_inet_error(Reason) when is_atom(Reason) ->
     case inet:format_error(Reason) of
-	"unknown POSIX error" -> atom_to_list(Reason);
-	Txt -> Txt
+        "unknown POSIX error" -> atom_to_list(Reason);
+        Txt -> Txt
     end;
 format_inet_error(Reason) ->
     lists:flatten(io_lib:format("unexpected error: ~p", [Reason])).
