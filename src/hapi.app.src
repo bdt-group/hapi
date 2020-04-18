@@ -6,7 +6,9 @@
    [kernel,
     stdlib,
     gun,
-    inets
+    inets,
+    yval,
+    jiffy
    ]},
   {env,[]},
   {modules, []},

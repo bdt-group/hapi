@@ -42,7 +42,7 @@
                         {http, inet_error_reason()} |
                         {system_error, term()}.
 
--export_type([uri/0, error_reason/0, http_reply/0]).
+-export_type([uri/0, req_opts/0, error_reason/0, http_reply/0]).
 
 %%%===================================================================
 %%% API

@@ -1,3 +1,4 @@
+{"1.1.0",
 [{<<"cowlib">>,
   {git,"https://github.com/ninenines/cowlib",
        {ref,"106ba84bb04537879d8ce59321a04e0682110b91"}},
@@ -5,4 +6,13 @@
  {<<"gun">>,
   {git,"https://github.com/ninenines/gun.git",
        {ref,"a916560ed43e7048cce54c8955f8ae0f08d69a3a"}},
-  0}].
+  0},
+ {<<"jiffy">>,{pkg,<<"jiffy">>,<<"1.0.4">>},0},
+ {<<"yval">>,
+  {git,"git@gitlab.bdt.tools:forks/yval.git",
+       {ref,"07bb138c90347ffaaabae161ee5a4fc1c8afdf0a"}},
+  0}]}.
+[
+{pkg_hash,[
+ {<<"jiffy">>, <<"72ADEFF75C52A2FF07DE738F0813768ABE7CE158026CC1115A170340259C0CAA">>}]}
+].
