@@ -20,9 +20,9 @@
 -export_type([problem_report/0]).
 
 -type problem_report() :: #{status := non_neg_integer(),
-                            type := binary(),
-                            title := binary(),
-                            detail := binary(),
+                            type => binary(),
+                            title => binary(),
+                            detail => binary(),
                             _ => term()}.
 -type json_error_reason() :: {invalid_json, yval:error_reason(), yval:ctx()} |
                              {malformed_json, binary()}.
@@ -82,10 +82,11 @@ format_error({malformed_json, <<>>}) ->
     "Empty JSON payload";
 format_error({malformed_json, Data}) ->
     io_lib:format("Malformed JSON~s", [format_non_empty(Data)]);
-format_error({problem_report,
-              #{status := Status, title := Title, detail := Detail}}) ->
+format_error({problem_report, #{status := Status} = Report}) ->
     io_lib:format("Problem reported with status ~B~s~s",
-                  [Status, format_non_empty(Title), format_non_empty(Detail)]);
+                  [Status,
+                   format_non_empty(maps:get(title, Report, <<>>)),
+                   format_non_empty(maps:get(detail, Report, <<>>))]);
 format_error({status, {Status, _Headers, Body}}) ->
     io_lib:format("Unexpected response with status ~B~s",
                   [Status, format_non_empty(Body)]);
@@ -158,7 +159,4 @@ problem_validator(Status) ->
         detail => yval:binary(),
         '_' => yval:any()},
       [{return, map},
-       {defaults, #{status => Status,
-                    type => <<>>,
-                    title => <<>>,
-                    detail => <<>>}}]).
+       {defaults, #{status => Status}}]).
