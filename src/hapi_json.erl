@@ -42,7 +42,7 @@ get(URI, Validator) ->
 -spec get(hapi:uri(), yval:validator(T), hapi:req_opts()) ->
                  {ok, T} | {error, error_reason()}.
 get(URI, Validator, Opts) ->
-    Ret = hapi:get(URI, Opts),
+    Ret = hapi:get(URI, set_headers(Opts)),
     process_response(Ret, Validator).
 
 -spec post(hapi:uri(), jiffy:json_value(), yval:validator(T)) ->
@@ -53,7 +53,7 @@ post(URI, JSON, Validator) ->
 -spec post(hapi:uri(), jiffy:json_value(), yval:validator(T), hapi:req_opts()) ->
                   {ok, T} | {error, error_reason()}.
 post(URI, JSON, Validator, Opts) ->
-    Ret = hapi:post(URI, encode(JSON), Opts),
+    Ret = hapi:post(URI, encode(JSON), set_headers(Opts)),
     process_response(Ret, Validator).
 
 -spec decode(binary(), yval:validator(T)) -> {ok, T} | {error, json_error_reason()}.
@@ -131,6 +131,12 @@ json_to_yaml({Key, Val}) ->
     {Key, json_to_yaml(Val)};
 json_to_yaml(Term) ->
     Term.
+
+-spec set_headers(hapi:req_opts()) -> hapi:req_opts().
+set_headers(ReqOpts) ->
+    Hdrs = maps:get(headers, ReqOpts, []),
+    Hdrs1 = [{<<"accept">>, <<"application/json, application/problem+json">>}|Hdrs],
+    ReqOpts#{headers => Hdrs1}.
 
 -spec format_non_empty(iodata()) -> iolist().
 format_non_empty(<<>>) ->
