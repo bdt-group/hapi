@@ -10,6 +10,7 @@
 %% API
 -export([start/0, stop/0]).
 -export([get/1, get/2]).
+-export([delete/1, delete/2]).
 -export([post/1, post/2, post/3]).
 -export([format_error/1]).
 -export([proxy_status/1]).
@@ -34,6 +35,7 @@
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type headers() :: [{binary(), binary()}].
 -type req() :: {get, http_uri:path(), http_uri:query(), headers()} |
+               {delete, http_uri:path(), http_uri:query(), headers()} |
                {post, http_uri:path(), http_uri:query(), headers(), iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type millisecs() :: non_neg_integer().
@@ -42,7 +44,7 @@
                         {http, inet_error_reason()} |
                         {system_error, term()}.
 
--export_type([uri/0, req_opts/0, error_reason/0, http_reply/0]).
+-export_type([uri/0, error_reason/0, http_reply/0, req_opts/0]).
 
 %%%===================================================================
 %%% API
@@ -66,16 +68,19 @@ get(URI) ->
          (uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
 get(URIs, Opts) when is_list(URIs) ->
     parallel_eval(get, URIs, [Opts]);
-get({http, _UserInfo, Host, Port, Path, Query}, Opts) ->
-    DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
-               {abs, AbsTime} -> AbsTime;
-               Timeout -> current_time() + Timeout
-           end,
-    Families = maps:get(ip_family, Opts, [inet]),
-    Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
-            {<<"connection">>, <<"close">>}|
-            maps:get(headers, Opts, [])],
-    req({get, Path, Query, Hdrs}, Host, Families, Port, DeadLine, 1).
+get(URI, Opts) ->
+    req(get, URI, Opts).
+
+-spec delete(uri() | [uri()]) -> {ok, http_reply()} | {error, error_reason()}.
+delete(URI) ->
+    delete(URI, #{}).
+
+-spec delete([uri()], req_opts()) -> [{ok, http_reply()} | {error, error_reason()}];
+            (uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+delete(URIs, Opts) when is_list(URIs) ->
+    parallel_eval(delete, URIs, [Opts]);
+delete(URI, Opts) ->
+    req(delete, URI, Opts).
 
 -spec post([{uri(), iodata()}]) -> [{ok, http_reply()} | {error, error_reason()}];
           ({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
@@ -126,6 +131,18 @@ proxy_status(_) -> 502.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec req(get | delete, uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+req(Method, {http, _UserInfo, Host, Port, Path, Query}, Opts) ->
+    DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
+               {abs, AbsTime} -> AbsTime;
+               Timeout -> current_time() + Timeout
+           end,
+    Families = maps:get(ip_family, Opts, [inet]),
+    Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
+            {<<"connection">>, <<"close">>}|
+            maps:get(headers, Opts, [])],
+    req({Method, Path, Query, Hdrs}, Host, Families, Port, DeadLine, 1).
+
 -spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
           millisecs(), pos_integer()) ->
           {ok, http_reply()} | {error, error_reason()}.
@@ -201,7 +218,9 @@ req(Req, ConnPid, MRef, DeadLine) ->
                     {get, Path, Query, Hdrs} ->
                         gun:get(ConnPid, Path ++ Query, Hdrs);
                     {post, Path, Query, Hdrs, Body} ->
-                        gun:post(ConnPid, Path ++ Query, Hdrs, Body)
+                        gun:post(ConnPid, Path ++ Query, Hdrs, Body);
+                    {delete, Path, Query, Hdrs} ->
+                        gun:delete(ConnPid, Path ++ Query, Hdrs)
                 end,
     receive
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->

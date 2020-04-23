@@ -10,6 +10,7 @@
 
 %% API
 -export([get/2, get/3]).
+-export([delete/2, delete/3]).
 -export([post/3, post/4]).
 -export([decode/2]).
 -export([encode/1]).
@@ -35,28 +36,39 @@
 %%% API
 %%%===================================================================
 -spec get(hapi:uri(), yval:validator(T)) ->
-                 {ok, T} | {error, error_reason()}.
+                 {ok, T | no_content} | {error, error_reason()}.
 get(URI, Validator) ->
     get(URI, Validator, #{}).
 
 -spec get(hapi:uri(), yval:validator(T), hapi:req_opts()) ->
-                 {ok, T} | {error, error_reason()}.
+                 {ok, T | no_content} | {error, error_reason()}.
 get(URI, Validator, Opts) ->
     Ret = hapi:get(URI, set_headers(Opts)),
     process_response(Ret, Validator).
 
+-spec delete(hapi:uri(), yval:validator(T)) ->
+                 {ok, T | no_content} | {error, error_reason()}.
+delete(URI, Validator) ->
+    get(URI, Validator, #{}).
+
+-spec delete(hapi:uri(), yval:validator(T), hapi:req_opts()) ->
+                 {ok, T | no_content} | {error, error_reason()}.
+delete(URI, Validator, Opts) ->
+    Ret = hapi:delete(URI, set_headers(Opts)),
+    process_response(Ret, Validator).
+
 -spec post(hapi:uri(), jiffy:json_value(), yval:validator(T)) ->
-                  {ok, T} | {error, error_reason()}.
+                  {ok, T | no_content} | {error, error_reason()}.
 post(URI, JSON, Validator) ->
     post(URI, JSON, Validator, #{}).
 
 -spec post(hapi:uri(), jiffy:json_value(), yval:validator(T), hapi:req_opts()) ->
-                  {ok, T} | {error, error_reason()}.
+                  {ok, T | no_content} | {error, error_reason()}.
 post(URI, JSON, Validator, Opts) ->
     Ret = hapi:post(URI, encode(JSON), set_headers(Opts)),
     process_response(Ret, Validator).
 
--spec decode(binary(), yval:validator(T)) -> {ok, T} | {error, json_error_reason()}.
+-spec decode(binary(), yval:validator(T)) -> {ok, T | no_content} | {error, json_error_reason()}.
 decode(Data, Validator) ->
     try jiffy:decode(Data) of
         JSON ->
@@ -108,6 +120,8 @@ proxy_status(Reason) -> hapi:proxy_status(Reason).
                               {ok, T} | {error, error_reason()}.
 process_response({ok, {200, _, Data}}, Validator) ->
     decode(Data, Validator);
+process_response({ok, {204, _, _}}, _) ->
+    {ok, no_content};
 process_response({ok, {Status, Headers, Data} = Reason}, _) ->
     case lists:keyfind(<<"content-type">>, 1, Headers) of
         {_, <<"application/problem+json">>} ->
