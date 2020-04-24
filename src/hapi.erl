@@ -22,15 +22,19 @@
 -define(DNS_TIMEOUT, timer:seconds(5)).
 -define(TCP_SEND_TIMEOUT, timer:seconds(5)).
 -define(REQ_TIMEOUT, timer:seconds(30)).
+-define(MAX_RETRIES, infinity).
 -define(RETRY_TIMEOUT, timer:seconds(1)).
 
 -type uri() :: {http, http_uri:user_info(),
                 http_uri:host(), inet:port_number(),
                 http_uri:path(), http_uri:query()}.
 -type req_opts() :: #{timeout => millisecs() | {abs, millisecs()},
+                      max_retries => pos_integer() | infinity,
+                      retry_base_timeout => millisecs(),
                       content_type => binary(),
                       headers => headers(),
                       ip_family => [inet | inet6, ...]}.
+-type retry_policy() :: {millisecs(), pos_integer() | infinity, pos_integer()}.
 -type host_family() :: {http_uri:host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type headers() :: [{binary(), binary()}].
@@ -105,13 +109,15 @@ post({http, _UserInfo, Host, Port, Path, Query}, Body, Opts) ->
                {abs, AbsTime} -> AbsTime;
                Timeout -> current_time() + Timeout
            end,
+    MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
+    RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
     ContentType = maps:get(content_type, Opts, ?DEFAULT_CONTENT_TYPE),
     Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
             {<<"connection">>, <<"close">>},
             {<<"content-type">>, ContentType}|
             maps:get(headers, Opts, [])],
-    req({post, Path, Query, Hdrs, Body}, Host, Families, Port, DeadLine, 1).
+    req({post, Path, Query, Hdrs, Body}, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, 1}).
 
 -spec format_error(error_reason()) -> string().
 format_error({dns, Reason}) ->
@@ -137,14 +143,16 @@ req(Method, {http, _UserInfo, Host, Port, Path, Query}, Opts) ->
                {abs, AbsTime} -> AbsTime;
                Timeout -> current_time() + Timeout
            end,
+    MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
+    RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
     Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
             {<<"connection">>, <<"close">>}|
             maps:get(headers, Opts, [])],
-    req({Method, Path, Query, Hdrs}, Host, Families, Port, DeadLine, 1).
+    req({Method, Path, Query, Hdrs}, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, 1}).
 
 -spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
-          millisecs(), pos_integer()) ->
+          millisecs(), retry_policy()) ->
           {ok, http_reply()} | {error, error_reason()}.
 req(Req, Host, Families, Port, DeadLine, Retries) ->
     case lookup(Host, Families, DeadLine) of
@@ -156,16 +164,18 @@ req(Req, Host, Families, Port, DeadLine, Retries) ->
     end.
 
 -spec retry_req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
-                millisecs(), pos_integer(), {ok, http_reply()} | {error, error_reason()}) ->
+                millisecs(), retry_policy(), {ok, http_reply()} | {error, error_reason()}) ->
           {ok, http_reply()} | {error, error_reason()}.
-retry_req(Req, Host, Families, Port, DeadLine, Retries, Ret) ->
+retry_req(_Req, _Host, _Families, _Port, _DeadLine, {_RetryTimeout, MaxRetries, MaxRetries}, Ret) ->
+    Ret;
+retry_req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, Attempt}, Ret) ->
     case need_retry(Ret) of
         true ->
-            Timeout = Retries * ?RETRY_TIMEOUT,
+            Timeout = Attempt * RetryTimeout,
             case (current_time() + Timeout) < DeadLine of
                 true ->
                     timer:sleep(Timeout),
-                    req(Req, Host, Families, Port, DeadLine, Retries+1);
+                    req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, Attempt+1});
                 false ->
                     Ret
             end;
