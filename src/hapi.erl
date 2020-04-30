@@ -31,24 +31,27 @@
 -type req_opts() :: #{timeout => millisecs() | {abs, millisecs()},
                       max_retries => pos_integer() | infinity,
                       retry_base_timeout => millisecs(),
-                      content_type => binary(),
+                      auth => auth(),
                       headers => headers(),
                       ip_family => [inet | inet6, ...]}.
 -type retry_policy() :: {millisecs(), pos_integer() | infinity, pos_integer()}.
 -type host_family() :: {http_uri:host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type headers() :: [{binary(), binary()}].
--type req() :: {get, http_uri:path(), http_uri:query(), headers()} |
-               {delete, http_uri:path(), http_uri:query(), headers()} |
+-type method() :: get | post | delete.
+-type req() :: {get | delete, http_uri:path(), http_uri:query(), headers()} |
                {post, http_uri:path(), http_uri:query(), headers(), iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type millisecs() :: non_neg_integer().
+-type auth() :: #{method := basic,
+                  username := iodata(),
+                  password := iodata()}.
 -type inet_error_reason() :: timeout | closed | inet:posix() | term().
 -type error_reason() :: {dns, inet_error_reason()} |
                         {http, inet_error_reason()} |
                         {system_error, term()}.
 
--export_type([uri/0, error_reason/0, http_reply/0, req_opts/0]).
+-export_type([uri/0, error_reason/0, http_reply/0, req_opts/0, method/0, headers/0]).
 
 %%%===================================================================
 %%% API
@@ -104,20 +107,8 @@ post(URI, Body) ->
     post(URI, Body, #{}).
 
 -spec post(uri(), iodata(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
-post({http, _UserInfo, Host, Port, Path, Query}, Body, Opts) ->
-    DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
-               {abs, AbsTime} -> AbsTime;
-               Timeout -> current_time() + Timeout
-           end,
-    MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
-    RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
-    Families = maps:get(ip_family, Opts, [inet]),
-    ContentType = maps:get(content_type, Opts, ?DEFAULT_CONTENT_TYPE),
-    Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
-            {<<"connection">>, <<"close">>},
-            {<<"content-type">>, ContentType}|
-            maps:get(headers, Opts, [])],
-    req({post, Path, Query, Hdrs, Body}, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, 1}).
+post(URI, Body, Opts) ->
+    req({post, Body}, URI, Opts).
 
 -spec format_error(error_reason()) -> string().
 format_error({dns, Reason}) ->
@@ -137,8 +128,9 @@ proxy_status(_) -> 502.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec req(get | delete, uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
-req(Method, {http, _UserInfo, Host, Port, Path, Query}, Opts) ->
+-spec req(get | delete | {post, iodata()}, uri(), req_opts()) ->
+                 {ok, http_reply()} | {error, error_reason()}.
+req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
                {abs, AbsTime} -> AbsTime;
                Timeout -> current_time() + Timeout
@@ -146,10 +138,12 @@ req(Method, {http, _UserInfo, Host, Port, Path, Query}, Opts) ->
     MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
     RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
-    Hdrs = [{<<"host">>, unicode:characters_to_binary(Host)},
-            {<<"connection">>, <<"close">>}|
-            maps:get(headers, Opts, [])],
-    req({Method, Path, Query, Hdrs}, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, 1}).
+    Hdrs = make_headers(URI, Opts),
+    Req = case Method of
+              {post, Body} -> {post, Path, Query, Hdrs, Body};
+              _ -> {Method, Path, Query, Hdrs}
+          end,
+    req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, 1}).
 
 -spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
           millisecs(), retry_policy()) ->
@@ -265,6 +259,22 @@ need_retry({ok, {Status, _, _}}) when Status < 500; Status >= 600 ->
     false;
 need_retry(_) ->
     true.
+
+-spec make_headers(uri(), hapi:req_opts()) -> headers().
+make_headers({_Scheme, _UserInfo, Host, _Port, _Path, _Query}, ReqOpts) ->
+    Hdrs1 = maps:get(headers, ReqOpts, []),
+    Hdrs2 = case maps:find(auth, ReqOpts) of
+                {ok, #{type := basic,
+                       username := User,
+                       password := Pass}} ->
+                    Authz = base64:encode(iolist_to_binary([User, $:, Pass])),
+                    [{<<"authorization">>, <<"Basic ", Authz/binary>>}|Hdrs1];
+                error ->
+                    Hdrs1
+            end,
+    [{<<"host">>, unicode:characters_to_binary(Host)},
+     {<<"connection">>, <<"close">>}|
+     Hdrs2].
 
 %%%-------------------------------------------------------------------
 %%% DNS lookup
