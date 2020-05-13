@@ -182,7 +182,8 @@ retry_req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, Attemp
 req(Req, [{Addr, Family}|Addrs], Port, DeadLine, Reason) ->
     case timeout(DeadLine) of
         Timeout when Timeout > 0 ->
-            ?LOG_DEBUG("Performing GET to http://~s:~B", [format_addr(Addr), Port]),
+            ?LOG_DEBUG("Performing ~s to http://~s:~B",
+                       [format_method(Req), format_addr(Addr), Port]),
             case gun:open(Addr, Port, #{transport => tcp,
                                         transport_opts => transport_opts(Family),
                                         retry => 0}) of
@@ -350,6 +351,10 @@ format_addr({_, _, _, _} = IPv4) ->
     inet:ntoa(IPv4);
 format_addr({_, _, _, _, _, _, _, _} = IPv6) ->
     "[" ++ inet:ntoa(IPv6) ++ "]".
+
+-spec format_method(req()) -> string().
+format_method(Req) ->
+    string:uppercase(atom_to_list(element(1, Req))).
 
 -spec format(io:format(), list()) -> string().
 format(Fmt, Args) ->
