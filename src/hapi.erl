@@ -29,6 +29,7 @@
                 http_uri:host(), inet:port_number(),
                 http_uri:path(), http_uri:query()}.
 -type req_opts() :: #{timeout => millisecs() | {abs, millisecs()},
+                      timeout_per_request => timeout(),
                       max_retries => pos_integer() | infinity,
                       retry_base_timeout => millisecs(),
                       auth => auth(),
@@ -132,9 +133,10 @@ proxy_status(_) -> 502.
                  {ok, http_reply()} | {error, error_reason()}.
 req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
-               {abs, AbsTime} -> AbsTime;
-               Timeout -> current_time() + Timeout
-           end,
+                   {abs, AbsTime} -> AbsTime;
+                   Timeout -> current_time() + Timeout
+               end,
+    ReqTimeout = maps:get(timeout_per_request, Opts, infinity),
     MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
     RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
@@ -143,33 +145,37 @@ req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
               {post, Body} -> {post, Path, Query, Hdrs, Body};
               _ -> {Method, Path, Query, Hdrs}
           end,
-    req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, 1}).
+    req(Req, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, MaxRetries, 1}).
 
 -spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
-          millisecs(), retry_policy()) ->
+          millisecs(), timeout(), retry_policy()) ->
           {ok, http_reply()} | {error, error_reason()}.
-req(Req, Host, Families, Port, DeadLine, Retries) ->
+req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries) ->
     case lookup(Host, Families, DeadLine) of
         {ok, Addrs} ->
-            Ret = req(Req, Addrs, Port, DeadLine, {http, timeout}),
-            retry_req(Req, Host, Families, Port, DeadLine, Retries, Ret);
+            Ret = req(Req, Addrs, Port, DeadLine, ReqTimeout, {http, timeout}),
+            retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries, Ret);
         {error, _} = Ret ->
-            retry_req(Req, Host, Families, Port, DeadLine, Retries, Ret)
+            retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries, Ret)
     end.
 
 -spec retry_req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
-                millisecs(), retry_policy(), {ok, http_reply()} | {error, error_reason()}) ->
+                millisecs(), timeout(), retry_policy(),
+                {ok, http_reply()} | {error, error_reason()}) ->
           {ok, http_reply()} | {error, error_reason()}.
-retry_req(_Req, _Host, _Families, _Port, _DeadLine, {_RetryTimeout, MaxRetries, MaxRetries}, Ret) ->
+retry_req(_Req, _Host, _Families, _Port, _DeadLine, _ReqTimeout,
+          {_RetryTimeout, MaxRetries, MaxRetries}, Ret) ->
     Ret;
-retry_req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, Attempt}, Ret) ->
+retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout,
+          {RetryTimeout, MaxRetries, Attempt}, Ret) ->
     case need_retry(Ret) of
         true ->
             Timeout = Attempt * RetryTimeout,
             case (current_time() + Timeout) < DeadLine of
                 true ->
                     timer:sleep(Timeout),
-                    req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, Attempt+1});
+                    req(Req, Host, Families, Port, DeadLine, ReqTimeout,
+                        {RetryTimeout, MaxRetries, Attempt+1});
                 false ->
                     Ret
             end;
@@ -177,13 +183,14 @@ retry_req(Req, Host, Families, Port, DeadLine, {RetryTimeout, MaxRetries, Attemp
             Ret
     end.
 
--spec req(req(), [addr_family()], inet:port_number(), millisecs(), error_reason()) ->
+-spec req(req(), [addr_family()], inet:port_number(), millisecs(), timeout(), error_reason()) ->
           {ok, http_reply()} | {error, error_reason()}.
-req(Req, [{Addr, Family}|Addrs], Port, DeadLine, Reason) ->
-    case timeout(DeadLine) of
+req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
+    ReqDeadLine = deadline_per_request(DeadLine, ReqTimeout, length(Addrs) + 1),
+    case timeout(ReqDeadLine) of
         Timeout when Timeout > 0 ->
-            ?LOG_DEBUG("Performing ~s to http://~s:~B",
-                       [format_method(Req), format_addr(Addr), Port]),
+            ?LOG_DEBUG("Performing ~s to http://~s:~B (timeout: ~.3fs)~n",
+                       [format_method(Req), format_addr(Addr), Port, Timeout/1000]),
             case gun:open(Addr, Port, #{transport => tcp,
                                         transport_opts => transport_opts(Family),
                                         retry => 0}) of
@@ -191,7 +198,7 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, Reason) ->
                     MRef = erlang:monitor(process, ConnPid),
                     Ret = receive
                               {gun_up, ConnPid, _Protocol} ->
-                                  req(Req, ConnPid, MRef, DeadLine);
+                                  req(Req, ConnPid, MRef, ReqDeadLine);
                               {'DOWN', MRef, process, ConnPid, Why} ->
                                   {error, prep_reason(Why)}
                           after Timeout ->
@@ -204,15 +211,15 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, Reason) ->
                         {ok, _} = OK ->
                             OK;
                         {error, NewReason} ->
-                            req(Req, Addrs, Port, DeadLine, NewReason)
+                            req(Req, Addrs, Port, DeadLine, ReqTimeout, NewReason)
                     end;
                 {error, Why} ->
-                    req(Req, Addrs, Port, DeadLine, {system_error, Why})
+                    req(Req, Addrs, Port, DeadLine, ReqTimeout, {system_error, Why})
             end;
         _ ->
             {error, Reason}
     end;
-req(_, [], _, _, Reason) ->
+req(_, [], _, _, _, Reason) ->
     {error, Reason}.
 
 -spec req(req(), pid(), reference(), millisecs()) ->
@@ -376,6 +383,16 @@ current_time() ->
 -spec timeout(millisecs()) -> non_neg_integer().
 timeout(DeadLine) ->
     max(0, DeadLine - current_time()).
+
+-spec deadline_per_request(millisecs(), timeout(), pos_integer()) -> millisecs().
+deadline_per_request(DeadLine, ReqTimeout, N) ->
+    CurrTime = current_time(),
+    Timeout = max(0, DeadLine - CurrTime),
+    CurrTime +
+        case is_integer(ReqTimeout) of
+            true -> min(Timeout, ReqTimeout);
+            false -> Timeout div N
+        end.
 
 transport_opts(Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},

@@ -1,7 +1,6 @@
 {application, hapi,
  [{description, "HTTP client for REST API"},
   {vsn, "1.0.0"},
-  {branch, "fix-debug-formatting"},
   {registered, []},
   {applications,
    [kernel,
