@@ -30,12 +30,12 @@
                 http_uri:path(), http_uri:query()}.
 -type req_opts() :: #{timeout => millisecs() | {abs, millisecs()},
                       timeout_per_request => timeout(),
-                      max_retries => pos_integer() | infinity,
+                      max_retries => non_neg_integer() | infinity,
                       retry_base_timeout => millisecs(),
                       auth => auth(),
                       headers => headers(),
                       ip_family => [inet | inet6, ...]}.
--type retry_policy() :: {millisecs(), pos_integer() | infinity, pos_integer()}.
+-type retry_policy() :: {millisecs(), non_neg_integer(), non_neg_integer() | infinity}.
 -type host_family() :: {http_uri:host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type headers() :: [{binary(), binary()}].
@@ -145,7 +145,7 @@ req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
               {post, Body} -> {post, Path, Query, Hdrs, Body};
               _ -> {Method, Path, Query, Hdrs}
           end,
-    req(Req, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, MaxRetries, 1}).
+    req(Req, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}).
 
 -spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
           millisecs(), timeout(), retry_policy()) ->
@@ -167,15 +167,15 @@ retry_req(_Req, _Host, _Families, _Port, _DeadLine, _ReqTimeout,
           {_RetryTimeout, MaxRetries, MaxRetries}, Ret) ->
     Ret;
 retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout,
-          {RetryTimeout, MaxRetries, Attempt}, Ret) ->
+          {RetryTimeout, Retry, MaxRetries}, Ret) ->
     case need_retry(Ret) of
         true ->
-            Timeout = Attempt * RetryTimeout,
+            Timeout = Retry * RetryTimeout,
             case (current_time() + Timeout) < DeadLine of
                 true ->
                     timer:sleep(Timeout),
                     req(Req, Host, Families, Port, DeadLine, ReqTimeout,
-                        {RetryTimeout, MaxRetries, Attempt+1});
+                        {RetryTimeout, Retry+1, MaxRetries});
                 false ->
                     Ret
             end;
