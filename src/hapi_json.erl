@@ -137,6 +137,8 @@ process_response({ok, {Status, Headers, Data} = Reason}, _) ->
 process_response({error, Reason}, _) ->
     {error, Reason}.
 
+json_to_yaml([{}]) ->
+    [];
 json_to_yaml(L) when is_list(L) ->
     [json_to_yaml(X) || X <- L];
 json_to_yaml({H}) ->
