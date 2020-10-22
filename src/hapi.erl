@@ -50,7 +50,8 @@
 -type inet_error_reason() :: timeout | closed | inet:posix() | term().
 -type error_reason() :: {dns, inet_error_reason()} |
                         {http, inet_error_reason()} |
-                        {system_error, term()}.
+                        {system_error, term()} |
+                        {exit, term()}.
 
 -export_type([uri/0, error_reason/0, http_reply/0, req_opts/0, method/0, headers/0]).
 
@@ -117,11 +118,14 @@ format_error({dns, Reason}) ->
 format_error({http, Reason}) ->
     format("HTTP request failed: ~s", [format_inet_error(Reason)]);
 format_error({system_error, Reason}) ->
-    format("Internal system error: ~p", [Reason]).
+    format("Internal system error: ~p", [Reason]);
+format_error({exit, Reason}) ->
+    format("HTTP request interrupted with reason: ~p", [Reason]).
 
 -spec proxy_status(http_reply() | error_reason()) -> non_neg_integer().
 proxy_status({Status, _Headers, _Body}) -> Status;
 proxy_status({system_error, _}) -> 500;
+proxy_status({exit, _}) -> 503;
 proxy_status({_, timeout}) -> 504;
 proxy_status({_, etimedout}) -> 504;
 proxy_status(_) -> 502.
@@ -200,7 +204,10 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
                               {gun_up, ConnPid, _Protocol} ->
                                   req(Req, ConnPid, MRef, ReqDeadLine);
                               {'DOWN', MRef, process, ConnPid, Why} ->
-                                  {error, prep_reason(Why)}
+                                  {error, prep_reason(Why)};
+                              {'EXIT', _, Why} ->
+                                  gun:close(ConnPid),
+                                  {error, {exit, Why}}
                           after Timeout ->
                                   gun:close(ConnPid),
                                   {error, {http, timeout}}
@@ -210,6 +217,8 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
                     case Ret of
                         {ok, _} = OK ->
                             OK;
+                        {error, {exit, _}} ->
+                            Ret;
                         {error, NewReason} ->
                             req(Req, Addrs, Port, DeadLine, ReqTimeout, NewReason)
                     end;
@@ -223,7 +232,7 @@ req(_, [], _, _, _, Reason) ->
     {error, Reason}.
 
 -spec req(req(), pid(), reference(), millisecs()) ->
-          {ok, http_reply()} | {error, {http, inet_error_reason()}}.
+          {ok, http_reply()} | {error, error_reason()}.
 req(Req, ConnPid, MRef, DeadLine) ->
     Timeout = timeout(DeadLine),
     StreamRef = case Req of
@@ -240,14 +249,17 @@ req(Req, ConnPid, MRef, DeadLine) ->
         {gun_response, ConnPid, StreamRef, nofin, Status, Headers} ->
             recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, <<>>);
         {'DOWN', MRef, process, ConnPid, Why} ->
-            {error, prep_reason(Why)}
+            {error, prep_reason(Why)};
+        {'EXIT', _, Why} ->
+            gun:close(ConnPid),
+            {error, {exit, Why}}
     after Timeout ->
             gun:close(ConnPid),
             {error, {http, timeout}}
     end.
 
 -spec recv_data(pid(), reference(), reference(), millisecs(), non_neg_integer(), headers(), binary()) ->
-          {ok, http_reply()} | {error, {http, inet_error_reason()}}.
+          {ok, http_reply()} | {error, error_reason()}.
 recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, Buf) ->
     Timeout = timeout(DeadLine),
     receive
@@ -256,7 +268,10 @@ recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, Buf) ->
         {gun_data, ConnPid, StreamRef, fin, Data} ->
             {ok, {Status, Headers, <<Buf/binary, Data/binary>>}};
         {'DOWN', MRef, process, ConnPid, Why} ->
-            {error, prep_reason(Why)}
+            {error, prep_reason(Why)};
+        {'EXIT', _, Why} ->
+            gun:close(ConnPid),
+            {error, {exit, Why}}
     after Timeout ->
             gun:close(ConnPid),
             {error, {http, timeout}}
@@ -264,6 +279,8 @@ recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, Buf) ->
 
 -spec need_retry({ok, http_reply()} | {error, error_reason()}) -> boolean().
 need_retry({ok, {Status, _, _}}) when Status < 500; Status >= 600 ->
+    false;
+need_retry({error, {exit, _}}) ->
     false;
 need_retry(_) ->
     true.
