@@ -278,7 +278,10 @@ recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, Buf) ->
     end.
 
 -spec need_retry({ok, http_reply()} | {error, error_reason()}) -> boolean().
-need_retry({ok, {Status, _, _}}) when Status < 500; Status >= 600 ->
+need_retry({ok, {Status, _, _}})
+  when Status == 500; Status == 502; Status == 503; Status == 504; Status == 507 ->
+    true;
+need_retry({ok, _}) ->
     false;
 need_retry({error, {exit, _}}) ->
     false;
