@@ -70,6 +70,22 @@ The following types are exported from `hapi` module:
     stands for IPv4 and `inet6` stands for IPv6. The default is `[inet]`
     which means that only IPv4 addresses will be resolved.
 
+  - `use_pool: boolean()`: Whether to use connection pool or not. The default
+    is `false`. The pool itself is configured using application environment
+    variables `pool_size` and `max_queue` with default values being `10` and `10000`
+    respectively. The `pool_size` sets the **maximum** number of connections
+    per endpoint (i.e. per IP-address/port pair). The pool is dynamic in the sense
+    that it keeps only required number of connections, i.e. new connections
+    are added to the pool only when all other connections are request-busy.
+    When the number of connections in the pool reaches `pool_size` number,
+    no new connections are added to the pool.
+    The variable `max_queue` defines the maximum number of requests in the
+    pool request queue. When the queue is overfilled (i.e. `max_queue` is reached)
+    the pool is first cleaned up from overdue requests, then, if the request queue
+    is still filled with more than **80%** of its capacity, the pool is completely
+    cleared with all its pending requests being discarded with the corresponding
+    error.
+
 - `method() :: get | post | delete`: an HTTP method.
 
 - `headers()`: HTTP headers represented as `[{binary(), binary()}]`.

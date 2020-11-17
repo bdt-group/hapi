@@ -10,6 +10,7 @@
     yval,
     jiffy
    ]},
+  {mod, {hapi_app, []}},
   {env,[]},
   {modules, []},
   {links, []}

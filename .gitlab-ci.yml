@@ -10,6 +10,7 @@ stages:
   - lint
   - xref
   - dialyze
+  - test
 
 job compile:
   stage: compile
@@ -39,6 +40,14 @@ job dialyze:
   stage: dialyze
   script:
     - make d_dialyze
+  except:
+    - master
+    - tags
+
+job test:
+  stage: test
+  script:
+    - make d_test
   except:
     - master
     - tags

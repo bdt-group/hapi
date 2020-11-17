@@ -1,0 +1,6 @@
+log:
+  level: debug
+
+hapi:
+  pool_size: 10
+  max_queue: 10000

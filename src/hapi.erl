@@ -28,26 +28,28 @@
 -type uri() :: {http, http_uri:user_info(),
                 http_uri:host(), inet:port_number(),
                 http_uri:path(), http_uri:query()}.
--type req_opts() :: #{timeout => millisecs() | {abs, millisecs()},
+-type req_opts() :: #{timeout => hapi_misc:millisecs() |
+                                 {abs, hapi_misc:millisecs()},
                       timeout_per_request => timeout(),
                       max_retries => non_neg_integer() | infinity,
-                      retry_base_timeout => millisecs(),
+                      retry_base_timeout => hapi_misc:millisecs(),
                       auth => auth(),
                       headers => headers(),
+                      use_pool => boolean(),
                       ip_family => [inet | inet6, ...]}.
--type retry_policy() :: {millisecs(), non_neg_integer(), non_neg_integer() | infinity}.
+-type retry_policy() :: {hapi_misc:millisecs(), non_neg_integer(), non_neg_integer() | infinity}.
 -type host_family() :: {http_uri:host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
+-type endpoint() :: {inet:ip_address(), inet:port_number()}.
 -type headers() :: [{binary(), binary()}].
 -type method() :: get | post | delete.
 -type req() :: {get | delete, http_uri:path(), http_uri:query(), headers()} |
                {post, http_uri:path(), http_uri:query(), headers(), iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
--type millisecs() :: non_neg_integer().
--type auth() :: #{method := basic,
+-type auth() :: #{type := basic,
                   username := iodata(),
                   password := iodata()}.
--type inet_error_reason() :: timeout | closed | inet:posix() | term().
+-type inet_error_reason() :: timeout | closed | overloaded | inet:posix() | term().
 -type error_reason() :: {dns, inet_error_reason()} |
                         {http, inet_error_reason()} |
                         {system_error, term()} |
@@ -73,10 +75,7 @@ stop() ->
 get(URI) ->
     get(URI, #{}).
 
--spec get([uri()], req_opts()) -> [{ok, http_reply()} | {error, error_reason()}];
-         (uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
-get(URIs, Opts) when is_list(URIs) ->
-    parallel_eval(get, URIs, [Opts]);
+-spec get(uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
 get(URI, Opts) ->
     req(get, URI, Opts).
 
@@ -84,25 +83,16 @@ get(URI, Opts) ->
 delete(URI) ->
     delete(URI, #{}).
 
--spec delete([uri()], req_opts()) -> [{ok, http_reply()} | {error, error_reason()}];
-            (uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
-delete(URIs, Opts) when is_list(URIs) ->
-    parallel_eval(delete, URIs, [Opts]);
+-spec delete(uri(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
 delete(URI, Opts) ->
     req(delete, URI, Opts).
 
--spec post([{uri(), iodata()}]) -> [{ok, http_reply()} | {error, error_reason()}];
-          ({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
-post(URIs) when is_list(URIs) ->
-    post(URIs, #{});
+-spec post({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
 post({URI, Body}) ->
     post(URI, Body, #{}).
 
 -spec post(uri(), iodata()) -> {ok, http_reply()} | {error, error_reason()};
-          ({uri(), iodata()}, req_opts()) -> {ok, http_reply()} | {error, error_reason()};
-          ([{uri(), iodata()}], req_opts()) -> [{ok, http_reply()} | {error, error_reason()}].
-post(URIs, Opts) when is_list(URIs) ->
-    parallel_eval(post, URIs, [Opts]);
+          ({uri(), iodata()}, req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
 post({URI, Body}, Opts) ->
     post(URI, Body, Opts);
 post(URI, Body) ->
@@ -128,6 +118,7 @@ proxy_status({system_error, _}) -> 500;
 proxy_status({exit, _}) -> 503;
 proxy_status({_, timeout}) -> 504;
 proxy_status({_, etimedout}) -> 504;
+proxy_status({_, overloaded}) -> 429;
 proxy_status(_) -> 502.
 
 %%%===================================================================
@@ -138,7 +129,7 @@ proxy_status(_) -> 502.
 req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
                    {abs, AbsTime} -> AbsTime;
-                   Timeout -> current_time() + Timeout
+                   Timeout -> hapi_misc:current_time() + Timeout
                end,
     ReqTimeout = maps:get(timeout_per_request, Opts, infinity),
     MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
@@ -152,7 +143,7 @@ req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     req(Req, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}).
 
 -spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
-          millisecs(), timeout(), retry_policy()) ->
+          hapi_misc:millisecs(), timeout(), retry_policy()) ->
           {ok, http_reply()} | {error, error_reason()}.
 req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries) ->
     case lookup(Host, Families, DeadLine) of
@@ -164,7 +155,7 @@ req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries) ->
     end.
 
 -spec retry_req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
-                millisecs(), timeout(), retry_policy(),
+                hapi_misc:millisecs(), timeout(), retry_policy(),
                 {ok, http_reply()} | {error, error_reason()}) ->
           {ok, http_reply()} | {error, error_reason()}.
 retry_req(_Req, _Host, _Families, _Port, _DeadLine, _ReqTimeout,
@@ -175,7 +166,7 @@ retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout,
     case need_retry(Ret) of
         true ->
             Timeout = Retry * RetryTimeout,
-            case (current_time() + Timeout) < DeadLine of
+            case (hapi_misc:current_time() + Timeout) < DeadLine of
                 true ->
                     timer:sleep(Timeout),
                     req(Req, Host, Families, Port, DeadLine, ReqTimeout,
@@ -187,29 +178,29 @@ retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout,
             Ret
     end.
 
--spec req(req(), [addr_family()], inet:port_number(), millisecs(), timeout(), error_reason()) ->
+-spec req(req(), [addr_family()], inet:port_number(), hapi_misc:millisecs(), timeout(), error_reason()) ->
           {ok, http_reply()} | {error, error_reason()}.
 req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
     ReqDeadLine = deadline_per_request(DeadLine, ReqTimeout, length(Addrs) + 1),
-    case timeout(ReqDeadLine) of
+    case hapi_misc:timeout(ReqDeadLine) of
         Timeout when Timeout > 0 ->
-            ?LOG_DEBUG("Performing ~s to http://~s:~B (timeout: ~.3fs)~n",
-                       [format_method(Req), format_addr(Addr), Port, Timeout/1000]),
-            case gun:open(Addr, Port, #{transport => tcp,
-                                        transport_opts => transport_opts(Family),
-                                        retry => 0}) of
+            ?LOG_DEBUG("Performing ~s to http://~s:~B (timeout: ~.3fs)",
+                       [format_method(Req), hapi_misc:format_addr(Addr), Port, Timeout/1000]),
+            case open({Addr, Port}, #{transport => tcp,
+                                      transport_opts => transport_opts(Family),
+                                      retry => 0}, Req, ReqDeadLine) of
                 {ok, ConnPid} ->
                     MRef = erlang:monitor(process, ConnPid),
                     Ret = receive
                               {gun_up, ConnPid, _Protocol} ->
-                                  req(Req, ConnPid, MRef, ReqDeadLine);
+                                  req({Addr, Port}, Req, ConnPid, MRef, ReqDeadLine);
                               {'DOWN', MRef, process, ConnPid, Why} ->
                                   {error, prep_reason(Why)};
                               {'EXIT', _, Why} ->
-                                  gun:close(ConnPid),
+                                  close({Addr, Port}, ConnPid, undefined, Req),
                                   {error, {exit, Why}}
                           after Timeout ->
-                                  gun:close(ConnPid),
+                                  close({Addr, Port}, ConnPid, undefined, Req),
                                   {error, {http, timeout}}
                           end,
                     erlang:demonitor(MRef),
@@ -223,7 +214,7 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
                             req(Req, Addrs, Port, DeadLine, ReqTimeout, NewReason)
                     end;
                 {error, Why} ->
-                    req(Req, Addrs, Port, DeadLine, ReqTimeout, {system_error, Why})
+                    req(Req, Addrs, Port, DeadLine, ReqTimeout, prep_reason(Why))
             end;
         _ ->
             {error, Reason}
@@ -231,50 +222,67 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
 req(_, [], _, _, _, Reason) ->
     {error, Reason}.
 
--spec req(req(), pid(), reference(), millisecs()) ->
+-spec req(endpoint(), req(), pid(), reference(), hapi_misc:millisecs()) ->
           {ok, http_reply()} | {error, error_reason()}.
-req(Req, ConnPid, MRef, DeadLine) ->
-    Timeout = timeout(DeadLine),
+req(AddrPort, Req, ConnPid, MRef, DeadLine) ->
+    Timeout = hapi_misc:timeout(DeadLine),
+    ReqOpts = #{reply_to => self()},
     StreamRef = case Req of
                     {get, Path, Query, Hdrs} ->
-                        gun:get(ConnPid, Path ++ Query, Hdrs);
+                        gun:get(ConnPid, Path ++ Query, Hdrs, ReqOpts);
                     {post, Path, Query, Hdrs, Body} ->
-                        gun:post(ConnPid, Path ++ Query, Hdrs, Body);
+                        gun:post(ConnPid, Path ++ Query, Hdrs, Body, ReqOpts);
                     {delete, Path, Query, Hdrs} ->
-                        gun:delete(ConnPid, Path ++ Query, Hdrs)
+                        gun:delete(ConnPid, Path ++ Query, Hdrs, ReqOpts)
                 end,
     receive
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->
+            close(AddrPort, ConnPid, StreamRef, Req),
             {ok, {Status, Headers, <<>>}};
         {gun_response, ConnPid, StreamRef, nofin, Status, Headers} ->
-            recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, <<>>);
+            recv_data(AddrPort, Req, ConnPid, MRef, StreamRef, DeadLine, Status, Headers, <<>>);
         {'DOWN', MRef, process, ConnPid, Why} ->
             {error, prep_reason(Why)};
         {'EXIT', _, Why} ->
-            gun:close(ConnPid),
+            close(AddrPort, ConnPid, StreamRef, Req),
             {error, {exit, Why}}
     after Timeout ->
-            gun:close(ConnPid),
+            close(AddrPort, ConnPid, StreamRef, Req),
             {error, {http, timeout}}
     end.
 
--spec recv_data(pid(), reference(), reference(), millisecs(), non_neg_integer(), headers(), binary()) ->
+-spec recv_data(endpoint(), req(), pid(), reference(), reference(),
+                hapi_misc:millisecs(), non_neg_integer(), headers(), binary()) ->
           {ok, http_reply()} | {error, error_reason()}.
-recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, Buf) ->
-    Timeout = timeout(DeadLine),
+recv_data(AddrPort, Req, ConnPid, MRef, StreamRef, DeadLine, Status, Headers, Buf) ->
+    Timeout = hapi_misc:timeout(DeadLine),
     receive
         {gun_data, ConnPid, StreamRef, nofin, Data} ->
-            recv_data(ConnPid, MRef, StreamRef, DeadLine, Status, Headers, <<Buf/binary, Data/binary>>);
+            recv_data(AddrPort, Req, ConnPid, MRef, StreamRef, DeadLine,
+                      Status, Headers, <<Buf/binary, Data/binary>>);
         {gun_data, ConnPid, StreamRef, fin, Data} ->
+            close(AddrPort, ConnPid, StreamRef, Req),
             {ok, {Status, Headers, <<Buf/binary, Data/binary>>}};
         {'DOWN', MRef, process, ConnPid, Why} ->
             {error, prep_reason(Why)};
         {'EXIT', _, Why} ->
-            gun:close(ConnPid),
+            close(AddrPort, ConnPid, StreamRef, Req),
             {error, {exit, Why}}
     after Timeout ->
-            gun:close(ConnPid),
+            close(AddrPort, ConnPid, StreamRef, Req),
             {error, {http, timeout}}
+    end.
+
+open({Addr, Port} = AddrPort, Opts, Req, DeadLine) ->
+    case use_pool(Req) of
+        true -> hapi_pool:open(AddrPort, Opts, DeadLine);
+        false -> gun:open(Addr, Port, Opts)
+    end.
+
+close(AddrPort, ConnPid, StreamRef, Req) ->
+    case use_pool(Req) of
+        true -> hapi_pool:close(AddrPort, ConnPid, StreamRef);
+        false -> gun:close(ConnPid)
     end.
 
 -spec need_retry({ok, http_reply()} | {error, error_reason()}) -> boolean().
@@ -300,14 +308,23 @@ make_headers({_Scheme, _UserInfo, Host, _Port, _Path, _Query}, ReqOpts) ->
                 error ->
                     Hdrs1
             end,
-    [{<<"host">>, unicode:characters_to_binary(Host)},
-     {<<"connection">>, <<"close">>}|
-     Hdrs2].
+    Hdrs3 = case maps:get(use_pool, ReqOpts, false) of
+                true -> [{<<"connection">>, <<"keep-alive">>}|Hdrs2];
+                false -> [{<<"connection">>, <<"close">>}|Hdrs2]
+            end,
+    [{<<"host">>, unicode:characters_to_binary(Host)} | Hdrs3].
+
+use_pool(Req) ->
+    Hdrs = element(4, Req),
+    case lists:keyfind(<<"connection">>, 1, Hdrs) of
+        {_, <<"keep-alive">>} -> true;
+        _ -> false
+    end.
 
 %%%-------------------------------------------------------------------
 %%% DNS lookup
 %%%-------------------------------------------------------------------
--spec lookup(http_uri:host(), [inet | inet6, ...], millisecs()) ->
+-spec lookup(http_uri:host(), [inet | inet6, ...], hapi_misc:millisecs()) ->
           {ok, [addr_family(), ...]} | {error, {dns, inet_error_reason()}}.
 lookup(Host, Families, DeadLine) ->
     case inet:parse_address(Host) of
@@ -318,10 +335,10 @@ lookup(Host, Families, DeadLine) ->
             lookup(Addrs, DeadLine, [], nxdomain)
     end.
 
--spec lookup([host_family()], millisecs(), [addr_family()], inet_error_reason()) ->
+-spec lookup([host_family()], hapi_misc:millisecs(), [addr_family()], inet_error_reason()) ->
           {ok, [addr_family(), ...]} | {error, {dns, inet_error_reason()}}.
 lookup([{Host, Family}|Addrs], DeadLine, Res, Err) ->
-    Timeout = min(?DNS_TIMEOUT, timeout(DeadLine)),
+    Timeout = min(?DNS_TIMEOUT, hapi_misc:timeout(DeadLine)),
     ?LOG_DEBUG("Looking up ~s address for ~ts",
                [format_family(Family), Host]),
     case inet:gethostbyname(Host, Family, Timeout) of
@@ -361,6 +378,8 @@ format_inet_error(closed) ->
     "connection closed unexpectedly";
 format_inet_error(timeout) ->
     "request timed out";
+format_inet_error(overloaded) ->
+    "too many requests";
 format_inet_error(Reason) when is_atom(Reason) ->
     case inet:format_error(Reason) of
         "unknown POSIX error" -> atom_to_list(Reason);
@@ -373,12 +392,6 @@ format_inet_error(Reason) ->
 format_family(inet) -> "IPv4";
 format_family(inet6) -> "IPv6".
 
--spec format_addr(inet:ip_address()) -> string().
-format_addr({_, _, _, _} = IPv4) ->
-    inet:ntoa(IPv4);
-format_addr({_, _, _, _, _, _, _, _} = IPv6) ->
-    "[" ++ inet:ntoa(IPv6) ++ "]".
-
 -spec format_method(req()) -> string().
 format_method(Req) ->
     string:uppercase(atom_to_list(element(1, Req))).
@@ -390,23 +403,22 @@ format(Fmt, Args) ->
 -spec prep_reason(term()) -> error_reason().
 prep_reason({shutdown, Reason}) ->
     {http, Reason};
+prep_reason(noproc) ->
+    {http, closed};
+prep_reason(Reason) when Reason == timeout;
+                         Reason == closed;
+                         Reason == overloaded ->
+    {http, Reason};
 prep_reason(Reason) ->
     {system_error, Reason}.
 
 %%%-------------------------------------------------------------------
 %%% Aux
 %%%-------------------------------------------------------------------
--spec current_time() -> millisecs().
-current_time() ->
-    erlang:system_time(millisecond).
-
--spec timeout(millisecs()) -> non_neg_integer().
-timeout(DeadLine) ->
-    max(0, DeadLine - current_time()).
-
--spec deadline_per_request(millisecs(), timeout(), pos_integer()) -> millisecs().
+-spec deadline_per_request(hapi_misc:millisecs(), timeout(), pos_integer()) ->
+                                  hapi_misc:millisecs().
 deadline_per_request(DeadLine, ReqTimeout, N) ->
-    CurrTime = current_time(),
+    CurrTime = hapi_misc:current_time(),
     Timeout = max(0, DeadLine - CurrTime),
     CurrTime +
         case is_integer(ReqTimeout) of
@@ -418,26 +430,3 @@ transport_opts(Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},
      {send_timeout_close, true},
      Family].
-
-parallel_eval(Fun, URIs, Args) ->
-    Self = self(),
-    Pids = lists:map(
-             fun(URI) ->
-                     spawn_monitor(
-                       fun() ->
-                               Self ! {self(), apply(?MODULE, Fun, [URI|Args])}
-                       end)
-             end, URIs),
-    collect_responses(Pids, []).
-
-collect_responses([], Acc) ->
-    lists:reverse(Acc);
-collect_responses([{Pid, MRef}|Pids], Acc) ->
-    Response = receive
-                   {Pid, Ret} ->
-                       erlang:demonitor(MRef, [flush]),
-                       Ret;
-                   {'DOWN', MRef, process, Pid, Reason} ->
-                       {error, {system_error, Reason}}
-               end,
-    collect_responses(Pids, [Response|Acc]).

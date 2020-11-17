@@ -2,7 +2,7 @@ REBAR ?= rebar3
 PROJECT := hapi
 BUILD_IMAGE  ?= gitlab.bdt.tools:5000/build-ubuntu1804:1.4.2
 
-.PHONY: compile clean distclean xref dialyzer dialyze linter lint
+.PHONY: compile clean distclean xref dialyzer dialyze linter lint test
 
 all: compile
 
@@ -12,7 +12,7 @@ compile:
 clean:
 	@$(REBAR) clean
 
-distclean: clean
+distclean:
 	rm -rf _build
 
 xref:
@@ -29,6 +29,10 @@ linter:
 
 lint:
 	@$(REBAR) as lint lint
+
+test:
+	@$(REBAR) eunit --verbose --cover
+	@$(REBAR) cover --verbose
 
 .PHONY: d_%
 

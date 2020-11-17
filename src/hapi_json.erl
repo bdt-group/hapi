@@ -83,6 +83,8 @@ decode(Data, Validator) ->
     end.
 
 -spec encode(jiffy:json_value()) -> iodata().
+encode(Data) when is_binary(Data) ->
+    Data;
 encode(JSON) ->
     jiffy:encode(JSON).
 
