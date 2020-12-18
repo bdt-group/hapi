@@ -28,6 +28,13 @@ get_test() ->
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().
 
+get_uri_string_test() ->
+    Host = "127.0.0.1", Port = get_port(), Path = "/empty",
+    URL = "http://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
+    URI = uri_string:parse(URL),
+    ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
+    assert_mailbox().
+
 dns_lookup_test() ->
     URI = make_uri("localhost", "/empty"),
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI, opts())),

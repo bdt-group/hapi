@@ -27,7 +27,8 @@
 
 -type uri() :: {http, http_uri:user_info(),
                 http_uri:host(), inet:port_number(),
-                http_uri:path(), http_uri:query()}.
+                http_uri:path(), http_uri:query()} |
+               uri_string:uri_map().
 -type req_opts() :: #{timeout => hapi_misc:millisecs() |
                                  {abs, hapi_misc:millisecs()},
                       timeout_per_request => timeout(),
@@ -126,6 +127,14 @@ proxy_status(_) -> 502.
 %%%===================================================================
 -spec req(get | delete | {post, iodata()}, uri(), req_opts()) ->
                  {ok, http_reply()} | {error, error_reason()}.
+req(Method, URI, Opts) when is_map(URI), map_size(URI) > 0 ->
+    Host = maps:get(host, URI),
+    Port = maps:get(port, URI, 80),
+    Path = maps:get(path, URI, ""),
+    Query = maps:get(query, URI, ""),
+    UserInfo = maps:get(userinfo, URI, ""),
+    req(Method, {http, UserInfo, Host, Port, Path, Query}, Opts);
+
 req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
                    {abs, AbsTime} -> AbsTime;
