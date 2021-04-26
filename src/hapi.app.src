@@ -13,5 +13,6 @@
   {mod, {hapi_app, []}},
   {env,[]},
   {modules, []},
-  {links, []}
+  {licenses, ["Apache 2.0"]},
+  {links, [{"GitHub", "https://github.com/bdt-group/hapi"}]}
  ]}.
