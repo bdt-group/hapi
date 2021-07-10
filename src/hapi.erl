@@ -139,7 +139,8 @@ proxy_status(_) -> 502.
 %%%===================================================================
 -spec req(get | delete | {post, iodata()}, uri(), req_opts()) ->
                  {ok, http_reply()} | {error, error_reason()}.
-req(Method, URI, Opts) when is_map(URI), map_size(URI) > 0 ->
+req(Method, URI0, Opts) when is_map(URI0), map_size(URI0) > 0 ->
+    URI = format_uri_map(URI0),
     Host = maps:get(host, URI),
     Port = maps:get(port, URI, 80),
     Path = maps:get(path, URI, ""),
@@ -394,6 +395,12 @@ get_addr_family(_) -> erlang:error(badarg).
 %%%-------------------------------------------------------------------
 %%% Formatters
 %%%-------------------------------------------------------------------
+-spec format_uri_map(uri_string:uri_map()) -> uri_string:uri_map().
+format_uri_map(URIMap) ->
+    maps:map(fun(_, V) when is_binary(V) -> binary_to_list(V);
+                (_, V) -> V
+             end, URIMap).
+
 -spec format_inet_error(inet_error_reason()) -> string().
 format_inet_error(closed) ->
     "connection closed unexpectedly";
