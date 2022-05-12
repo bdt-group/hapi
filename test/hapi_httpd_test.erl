@@ -77,7 +77,6 @@ delete_resource(Req, State) ->
     handle_request(Req, State).
 
 handle_request(#{method := Method, path_info := Info} = Req, State) ->
-    ?LOG_DEBUG("Received req:~p", [Req]),
     handle(Method, Info, Req, State).
 
 %%%===================================================================
