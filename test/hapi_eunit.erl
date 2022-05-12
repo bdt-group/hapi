@@ -28,8 +28,8 @@ get_test() ->
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().
 
-get_test_https() ->
-    URI = #{scheme => "https", port => 443, host => "127.0.0.1", path => "/empty"},
+get_https_test() ->
+    URI = #{scheme => "https", port => 8443, host => "127.0.0.1", path => "/empty"},
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().
 

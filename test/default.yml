@@ -1,5 +1,7 @@
 log:
   level: debug
+  exclude_meta:
+    - error_logger
 
 hapi:
   pool_size: 10

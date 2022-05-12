@@ -58,7 +58,7 @@
 -type endpoint() :: {inet:ip_address(), inet:port_number()}.
 -type headers() :: [{binary(), binary()}].
 -type method() :: get | post | delete.
--type req() :: {get | delete, schema(), http_uri:path(), http_uri:query(), headers()} |
+-type req() :: {get | delete, scheme(), http_uri:path(), http_uri:query(), headers()} |
                {post, scheme(), http_uri:path(), http_uri:query(), headers(), iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type auth() :: #{type := basic,
@@ -146,7 +146,7 @@ req(Method, URI0, Opts) when is_map(URI0), map_size(URI0) > 0 ->
     Host = maps:get(host, URI),
     Port = maps:get(port, URI, 80),
     Path = maps:get(path, URI, ""),
-    Scheme = maps:get(scheme, URI),
+    Scheme = list_to_existing_atom(maps:get(scheme, URI)),
     Query = maps:get(query, URI, ""),
     UserInfo = maps:get(userinfo, URI, ""),
     req(Method, {Scheme, UserInfo, Host, Port, Path, Query}, Opts);
@@ -211,8 +211,8 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
         Timeout when Timeout > 0 ->
             Scheme = extract_scheme(Req),
             Transport = infer_transport(Scheme),
-            ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs)",
-                       [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000]),
+            ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs) ~p",
+                       [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000, transport_opts(Family)]),
             case open({Addr, Port}, #{transport => Transport,
                                       transport_opts => transport_opts(Family),
                                       retry => 0}, Req, ReqDeadLine) of
@@ -230,6 +230,7 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
                                   close({Addr, Port}, ConnPid, undefined, Req),
                                   {error, {http, timeout}}
                           end,
+                    ?LOG_DEBUG("Ret:~p", [Ret]),
                     erlang:demonitor(MRef),
                     gun:flush(ConnPid),
                     case Ret of

@@ -41,7 +41,8 @@ start() ->
                                  shutdown_timeout => timer:minutes(5)}),
             {ok, _} = cowboy:start_tls(https_listener,
                 [
-                    {port, 443},
+                    {port, 8443},
+                    {ip, {127, 0, 0, 1}},
                     {certfile, "test.crt"},
                     {keyfile, "test.key"}
                 ],
@@ -76,6 +77,7 @@ delete_resource(Req, State) ->
     handle_request(Req, State).
 
 handle_request(#{method := Method, path_info := Info} = Req, State) ->
+    ?LOG_DEBUG("Received req:~p", [Req]),
     handle(Method, Info, Req, State).
 
 %%%===================================================================
