@@ -211,8 +211,8 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
         Timeout when Timeout > 0 ->
             Scheme = extract_scheme(Req),
             Transport = infer_transport(Scheme),
-            ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs) ~p",
-                       [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000, transport_opts(Family)]),
+            ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs)",
+                       [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000]),
             case open({Addr, Port}, #{transport => Transport,
                                       transport_opts => transport_opts(Family),
                                       retry => 0}, Req, ReqDeadLine) of
