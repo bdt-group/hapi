@@ -343,7 +343,7 @@ make_headers({_Scheme, _UserInfo, Host, _Port, _Path, _Query}, ReqOpts) ->
     [{<<"host">>, unicode:characters_to_binary(Host)} | Hdrs3].
 
 use_pool(Req) ->
-    Hdrs = element(4, Req),
+    Hdrs = element(5, Req),
     case lists:keyfind(<<"connection">>, 1, Hdrs) of
         {_, <<"keep-alive">>} -> true;
         _ -> false
