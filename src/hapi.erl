@@ -37,6 +37,8 @@
 -define(MAX_RETRIES, infinity).
 -define(RETRY_TIMEOUT, timer:seconds(1)).
 
+-type scheme() :: http | https.
+-type transport() :: tcp | tls.
 -type uri() :: {http, http_uri:user_info(),
                 http_uri:host(), inet:port_number(),
                 http_uri:path(), http_uri:query()} |
@@ -56,8 +58,8 @@
 -type endpoint() :: {inet:ip_address(), inet:port_number()}.
 -type headers() :: [{binary(), binary()}].
 -type method() :: get | post | delete.
--type req() :: {get | delete, http_uri:path(), http_uri:query(), headers()} |
-               {post, http_uri:path(), http_uri:query(), headers(), iodata()}.
+-type req() :: {get | delete, schema(), http_uri:path(), http_uri:query(), headers()} |
+               {post, scheme(), http_uri:path(), http_uri:query(), headers(), iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type auth() :: #{type := basic,
                   username := iodata(),
@@ -144,11 +146,12 @@ req(Method, URI0, Opts) when is_map(URI0), map_size(URI0) > 0 ->
     Host = maps:get(host, URI),
     Port = maps:get(port, URI, 80),
     Path = maps:get(path, URI, ""),
+    Scheme = maps:get(scheme, URI),
     Query = maps:get(query, URI, ""),
     UserInfo = maps:get(userinfo, URI, ""),
-    req(Method, {http, UserInfo, Host, Port, Path, Query}, Opts);
+    req(Method, {Scheme, UserInfo, Host, Port, Path, Query}, Opts);
 
-req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
+req(Method, {Scheme, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
                    {abs, AbsTime} -> AbsTime;
                    Timeout -> hapi_misc:current_time() + Timeout
@@ -159,8 +162,8 @@ req(Method, {http, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     Families = maps:get(ip_family, Opts, [inet]),
     Hdrs = make_headers(URI, Opts),
     Req = case Method of
-              {post, Body} -> {post, Path, Query, Hdrs, Body};
-              _ -> {Method, Path, Query, Hdrs}
+              {post, Body} -> {post, Scheme, Path, Query, Hdrs, Body};
+              _ -> {Method, Scheme, Path, Query, Hdrs}
           end,
     req(Req, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}).
 
@@ -206,9 +209,11 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
     ReqDeadLine = deadline_per_request(DeadLine, ReqTimeout, length(Addrs) + 1),
     case hapi_misc:timeout(ReqDeadLine) of
         Timeout when Timeout > 0 ->
-            ?LOG_DEBUG("Performing ~s to http://~s:~B (timeout: ~.3fs)",
-                       [format_method(Req), hapi_misc:format_addr(Addr), Port, Timeout/1000]),
-            case open({Addr, Port}, #{transport => tcp,
+            Scheme = extract_scheme(Req),
+            Transport = infer_transport(Scheme),
+            ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs)",
+                       [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000]),
+            case open({Addr, Port}, #{transport => Transport,
                                       transport_opts => transport_opts(Family),
                                       retry => 0}, Req, ReqDeadLine) of
                 {ok, ConnPid} ->
@@ -250,11 +255,11 @@ req(AddrPort, Req, ConnPid, MRef, DeadLine) ->
     Timeout = hapi_misc:timeout(DeadLine),
     ReqOpts = #{reply_to => self()},
     StreamRef = case Req of
-                    {get, Path, Query, Hdrs} ->
+                    {get, _, Path, Query, Hdrs} ->
                         gun:get(ConnPid, Path ++ Query, Hdrs, ReqOpts);
-                    {post, Path, Query, Hdrs, Body} ->
+                    {post, _, Path, Query, Hdrs, Body} ->
                         gun:post(ConnPid, Path ++ Query, Hdrs, Body, ReqOpts);
-                    {delete, Path, Query, Hdrs} ->
+                    {delete, _, Path, Query, Hdrs} ->
                         gun:delete(ConnPid, Path ++ Query, Hdrs, ReqOpts)
                 end,
     receive
@@ -458,3 +463,11 @@ transport_opts(Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},
      {send_timeout_close, true},
      Family].
+
+
+-spec extract_scheme(req()) -> scheme().
+extract_scheme(Req) -> element(2, Req).
+
+-spec infer_transport(scheme()) -> transport().
+infer_transport(http) -> tcp;
+infer_transport(https) -> tls.

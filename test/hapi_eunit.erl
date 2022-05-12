@@ -28,6 +28,11 @@ get_test() ->
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().
 
+get_test_https() ->
+    URI = #{scheme => "https", port => 443, host => "127.0.0.1", path => "/empty"},
+    ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
+    assert_mailbox().
+
 get_uri_string_test() ->
     Host = "127.0.0.1", Port = get_port(), Path = "/empty",
     URL = "http://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
@@ -405,7 +410,10 @@ make_uri(Host, Path) ->
     make_uri(Host, get_port(), Path).
 
 make_uri(Host, Port, Path) ->
-    URL = "http://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
+    make_uri("http", Host, Port, Path).
+
+make_uri(Scheme, Host, Port, Path) ->
+    URL = Scheme ++ "://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
     {ok, URI} = http_uri:parse(URL),
     URI.
 

@@ -38,13 +38,22 @@ start() ->
             cowboy:start_clear(?MODULE,
                                [{port, 0}, {ip, {127, 0, 0, 1}}],
                                #{env => #{dispatch => Dispatch},
-                                 shutdown_timeout => timer:minutes(5)});
+                                 shutdown_timeout => timer:minutes(5)}),
+            {ok, _} = cowboy:start_tls(https_listener,
+                [
+                    {port, 443},
+                    {certfile, "test.crt"},
+                    {keyfile, "test.key"}
+                ],
+                #{env => #{dispatch => Dispatch}}
+            );
         Err ->
             Err
     end.
 
 stop() ->
     cowboy:stop_listener(?MODULE),
+    cowboy:stop_listener(https_listener),
     application:stop(cowboy).
 
 init(Req, State) ->
