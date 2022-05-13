@@ -265,7 +265,7 @@ stop_connection(ConnPid, State) ->
     case maps:take(ConnPid, State#state.connections) of
         {{Monitor, _}, Connections} ->
             erlang:demonitor(Monitor),
-            gun:close(ConnPid),
+            gun:shutdown(ConnPid),
             State#state{connections = Connections};
         error ->
             State

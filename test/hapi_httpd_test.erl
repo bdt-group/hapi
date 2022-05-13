@@ -32,19 +32,29 @@
 %%%===================================================================
 start() ->
     case application:ensure_all_started(cowboy) of
-        {ok, _} ->
+        {ok, StartList} ->
+            ?LOG_DEBUG("Startlist:~p", [StartList]),
+            {ok, CurrentDirectory} = file:get_cwd(),
+            ?LOG_DEBUG("Dir: ~p", [CurrentDirectory]),
+            CertPath = filename:join([CurrentDirectory, "test","cert.pem"]),
+            KeyPath = filename:join([CurrentDirectory,"test","key.pem"]),
+            {ok, Bin1} = file:read_file(CertPath),
+            {ok, Bin2} = file:read_file(KeyPath),
+            ?LOG_DEBUG("Cert:~p", [Bin1]),
+            ?LOG_DEBUG("Key:~p", [Bin2]),
+
             Dispatch = cowboy_router:compile(
                          [{'_', [{"/[...]", ?MODULE, #{}}]}]),
-            cowboy:start_clear(?MODULE,
+            {ok, _} = cowboy:start_clear(?MODULE,
                                [{port, 0}, {ip, {127, 0, 0, 1}}],
                                #{env => #{dispatch => Dispatch},
                                  shutdown_timeout => timer:minutes(5)}),
             {ok, _} = cowboy:start_tls(https_listener,
                 [
-                    {port, 8443},
+                    {port, 0},
                     {ip, {127, 0, 0, 1}},
-                    {certfile, "test.crt"},
-                    {keyfile, "test.key"}
+                    {certfile, CertPath},
+                    {keyfile, KeyPath}
                 ],
                 #{env => #{dispatch => Dispatch}}
             );

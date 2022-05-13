@@ -214,7 +214,7 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
             ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs)",
                        [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000]),
             case open({Addr, Port}, #{transport => Transport,
-                                      transport_opts => transport_opts(Family),
+                                      transport_opts => transport_opts(Transport, Family),
                                       retry => 0}, Req, ReqDeadLine) of
                 {ok, ConnPid} ->
                     MRef = erlang:monitor(process, ConnPid),
@@ -310,8 +310,9 @@ open({Addr, Port} = AddrPort, Opts, Req, DeadLine) ->
 close(AddrPort, ConnPid, StreamRef, Req) ->
     case use_pool(Req) of
         true -> hapi_pool:close(AddrPort, ConnPid, StreamRef);
-        false -> gun:close(ConnPid)
+        false -> gun:shutdown(ConnPid)
     end.
+
 
 -spec need_retry({ok, http_reply()} | {error, error_reason()}) -> boolean().
 need_retry({ok, {Status, _, _}})
@@ -460,7 +461,9 @@ deadline_per_request(DeadLine, ReqTimeout, N) ->
             false -> Timeout div N
         end.
 
-transport_opts(Family) ->
+transport_opts(tls, Family) ->
+    [Family];
+transport_opts(tcp, Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},
      {send_timeout_close, true},
      Family].

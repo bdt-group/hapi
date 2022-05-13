@@ -29,7 +29,11 @@ get_test() ->
     assert_mailbox().
 
 get_https_test() ->
-    URI = #{scheme => "https", port => 8443, host => "127.0.0.1", path => "/empty"},
+
+    ssl:start(),
+    {ok, _} = ssl:connect("127.0.0.1", get_https_port(),  [{verify, verify_none}], infinity),
+
+    URI = #{scheme => "https", port => get_https_port(), host => "127.0.0.1", path => "/empty"},
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().
 
@@ -402,6 +406,9 @@ get(Path, Opts) ->
 
 get_port() ->
     ranch:get_port(hapi_httpd_test).
+
+get_https_port()->
+    ranch:get_port(https_listener).
 
 make_uri(Path) ->
     make_uri("127.0.0.1", Path).
