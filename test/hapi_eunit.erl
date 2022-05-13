@@ -29,10 +29,6 @@ get_test() ->
     assert_mailbox().
 
 get_https_test() ->
-
-    ssl:start(),
-    {ok, _} = ssl:connect("127.0.0.1", get_https_port(),  [{verify, verify_none}], infinity),
-
     URI = #{scheme => "https", port => get_https_port(), host => "127.0.0.1", path => "/empty"},
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().

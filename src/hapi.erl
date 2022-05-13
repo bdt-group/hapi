@@ -462,7 +462,10 @@ deadline_per_request(DeadLine, ReqTimeout, N) ->
         end.
 
 transport_opts(tls, Family) ->
-    [Family];
+    [{send_timeout, ?TCP_SEND_TIMEOUT},
+     {send_timeout_close, true},
+     {active, false},
+     Family];
 transport_opts(tcp, Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},
      {send_timeout_close, true},
