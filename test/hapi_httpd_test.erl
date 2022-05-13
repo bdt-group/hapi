@@ -33,18 +33,32 @@
 start() ->
     case application:ensure_all_started(cowboy) of
         {ok, _} ->
+            {ok, CurrentDirectory} = file:get_cwd(),
+            CertPath = filename:join([CurrentDirectory, "test","cert.pem"]),
+            KeyPath = filename:join([CurrentDirectory,"test","key.pem"]),
+
             Dispatch = cowboy_router:compile(
                          [{'_', [{"/[...]", ?MODULE, #{}}]}]),
-            cowboy:start_clear(?MODULE,
+            {ok, _} = cowboy:start_clear(?MODULE,
                                [{port, 0}, {ip, {127, 0, 0, 1}}],
                                #{env => #{dispatch => Dispatch},
-                                 shutdown_timeout => timer:minutes(5)});
+                                 shutdown_timeout => timer:minutes(5)}),
+            {ok, _} = cowboy:start_tls(https_listener,
+                [
+                    {port, 0},
+                    {ip, {127, 0, 0, 1}},
+                    {certfile, CertPath},
+                    {keyfile, KeyPath}
+                ],
+                #{env => #{dispatch => Dispatch}}
+            );
         Err ->
             Err
     end.
 
 stop() ->
     cowboy:stop_listener(?MODULE),
+    cowboy:stop_listener(https_listener),
     application:stop(cowboy).
 
 init(Req, State) ->
