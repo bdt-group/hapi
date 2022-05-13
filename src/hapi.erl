@@ -39,7 +39,7 @@
 
 -type scheme() :: http | https.
 -type transport() :: tcp | tls.
--type uri() :: {http, http_uri:user_info(),
+-type uri() :: {http | https, http_uri:user_info(),
                 http_uri:host(), inet:port_number(),
                 http_uri:path(), http_uri:query()} |
                uri_string:uri_map().
@@ -209,8 +209,11 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
     ReqDeadLine = deadline_per_request(DeadLine, ReqTimeout, length(Addrs) + 1),
     case hapi_misc:timeout(ReqDeadLine) of
         Timeout when Timeout > 0 ->
-            Scheme = extract_scheme(Req),
-            Transport = infer_transport(Scheme),
+            Scheme = element(2, Req),
+            Transport = case Scheme of
+                http -> tcp;
+                https -> tls
+            end,
             ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs)",
                        [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000]),
             case open({Addr, Port}, #{transport => Transport,
@@ -469,11 +472,3 @@ transport_opts(tcp, Family) ->
     [{send_timeout, ?TCP_SEND_TIMEOUT},
      {send_timeout_close, true},
      Family].
-
-
--spec extract_scheme(req()) -> scheme().
-extract_scheme(Req) -> element(2, Req).
-
--spec infer_transport(scheme()) -> transport().
-infer_transport(http) -> tcp;
-infer_transport(https) -> tls.

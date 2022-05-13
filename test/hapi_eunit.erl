@@ -68,13 +68,13 @@ post_test() ->
 delete_test() ->
     URI = make_uri("/empty-json"),
     ?assertMatch({ok, []},
-                 hapi_json:delete(URI, yval:options(#{}), #{timeout => 60000})),
+                 hapi_json:delete(URI, yval:options(#{}))),
     assert_mailbox().
 
 delete_no_content_test() ->
     URI = make_uri("/status/204"),
     ?assertMatch({ok, no_content},
-                 hapi_json:delete(URI, yval:options(#{})), #{timeout => 60000}),
+                 hapi_json:delete(URI, yval:options(#{}))),
     assert_mailbox().
 
 empty_json_test() ->
