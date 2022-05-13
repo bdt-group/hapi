@@ -28,10 +28,30 @@ get_test() ->
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().
 
+get_https_test() ->
+    URI = #{scheme => "https", port => get_https_port(), host => "127.0.0.1", path => "/empty"},
+    ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
+    assert_mailbox().
+
 get_uri_string_test() ->
     Host = "127.0.0.1", Port = get_port(), Path = "/empty",
     URL = "http://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
     URI = uri_string:parse(URL),
+    ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)).
+
+get_uri_binary_test() ->
+    Host = <<"127.0.0.1">>, Port = get_port(), Path = <<"/empty">>,
+    URL = <<"http://", Host/binary, ":", (integer_to_binary(Port))/binary, Path/binary>>,
+    URI = uri_string:parse(URL),
+    ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)).
+
+get_uri_map_test() ->
+    URI = #{
+        host => <<"127.0.0.1">>,
+        port => get_https_port(),
+        scheme => <<"https">>,
+        path => <<"/empty">>
+    },
     ?assertMatch({ok, {200, _Hdrs, <<>>}}, hapi:get(URI)),
     assert_mailbox().
 
@@ -398,6 +418,9 @@ get(Path, Opts) ->
 get_port() ->
     ranch:get_port(hapi_httpd_test).
 
+get_https_port()->
+    ranch:get_port(https_listener).
+
 make_uri(Path) ->
     make_uri("127.0.0.1", Path).
 
@@ -405,7 +428,10 @@ make_uri(Host, Path) ->
     make_uri(Host, get_port(), Path).
 
 make_uri(Host, Port, Path) ->
-    URL = "http://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
+    make_uri("http", Host, Port, Path).
+
+make_uri(Scheme, Host, Port, Path) ->
+    URL = Scheme ++ "://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
     {ok, URI} = http_uri:parse(URL),
     URI.
 
