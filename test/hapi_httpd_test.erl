@@ -32,16 +32,10 @@
 %%%===================================================================
 start() ->
     case application:ensure_all_started(cowboy) of
-        {ok, StartList} ->
-            ?LOG_DEBUG("Startlist:~p", [StartList]),
+        {ok, _} ->
             {ok, CurrentDirectory} = file:get_cwd(),
-            ?LOG_DEBUG("Dir: ~p", [CurrentDirectory]),
             CertPath = filename:join([CurrentDirectory, "test","cert.pem"]),
             KeyPath = filename:join([CurrentDirectory,"test","key.pem"]),
-            {ok, Bin1} = file:read_file(CertPath),
-            {ok, Bin2} = file:read_file(KeyPath),
-            ?LOG_DEBUG("Cert:~p", [Bin1]),
-            ?LOG_DEBUG("Key:~p", [Bin2]),
 
             Dispatch = cowboy_router:compile(
                          [{'_', [{"/[...]", ?MODULE, #{}}]}]),

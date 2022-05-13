@@ -230,7 +230,6 @@ req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
                                   close({Addr, Port}, ConnPid, undefined, Req),
                                   {error, {http, timeout}}
                           end,
-                    ?LOG_DEBUG("Ret:~p", [Ret]),
                     erlang:demonitor(MRef),
                     gun:flush(ConnPid),
                     case Ret of
@@ -310,7 +309,7 @@ open({Addr, Port} = AddrPort, Opts, Req, DeadLine) ->
 close(AddrPort, ConnPid, StreamRef, Req) ->
     case use_pool(Req) of
         true -> hapi_pool:close(AddrPort, ConnPid, StreamRef);
-        false -> gun:shutdown(ConnPid)
+        false -> gun:close(ConnPid)
     end.
 
 
