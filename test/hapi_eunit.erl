@@ -432,7 +432,7 @@ make_uri(Host, Port, Path) ->
 
 make_uri(Scheme, Host, Port, Path) ->
     URL = Scheme ++ "://" ++ Host ++ ":" ++ integer_to_list(Port) ++ Path,
-    {ok, URI} = http_uri:parse(URL),
+    URI = uri_string:parse(URL),
     URI.
 
 get_addr_port() ->

@@ -19,7 +19,7 @@ codec to decode and [yval](https://github.com/zinid/yval) validator to validate 
 
 The following types are exported from `hapi` module:
 
-- `uri()`: an URI represented in format produced by `http_uri:parse/1` or `uri_string:uri_map()`.
+- `uri()`: an URI represented in format produced by `uri_string:uri_map()`.
 
 - `req_opts()`: a map holding request options. All options are optional.
   Available options are:
