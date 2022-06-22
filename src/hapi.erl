@@ -30,18 +30,13 @@
 -include_lib("kernel/include/inet.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--define(DEFAULT_CONTENT_TYPE, <<"application/json">>).
 -define(DNS_TIMEOUT, timer:seconds(5)).
 -define(TCP_SEND_TIMEOUT, timer:seconds(5)).
 -define(REQ_TIMEOUT, timer:seconds(30)).
 -define(MAX_RETRIES, infinity).
 -define(RETRY_TIMEOUT, timer:seconds(1)).
 
--type scheme() :: http | https.
--type uri() :: {scheme(), http_uri:user_info(),
-                http_uri:host(), inet:port_number(),
-                http_uri:path(), http_uri:query()} |
-               uri_string:uri_map().
+-type uri() :: uri_string:uri_map().
 -type req_opts() :: #{timeout => hapi_misc:millisecs() |
                                  {abs, hapi_misc:millisecs()},
                       timeout_per_request => timeout(),
@@ -52,13 +47,13 @@
                       use_pool => boolean(),
                       ip_family => [inet | inet6, ...]}.
 -type retry_policy() :: {hapi_misc:millisecs(), non_neg_integer(), non_neg_integer() | infinity}.
--type host_family() :: {http_uri:host(), inet | inet6}.
+-type host() :: string().
+-type host_family() :: {host(), inet | inet6}.
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type endpoint() :: {inet:ip_address(), inet:port_number()}.
 -type headers() :: [{binary(), binary()}].
 -type method() :: get | post | delete.
--type req() :: {get | delete, scheme(), http_uri:path(), http_uri:query(), headers()} |
-               {post, scheme(), http_uri:path(), http_uri:query(), headers(), iodata()}.
+-type req() :: #{method := method(), uri := uri(), headers := headers(), body => iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type auth() :: #{type := basic,
                   username := iodata(),
@@ -85,7 +80,7 @@ start() ->
 stop() ->
     application:stop(?MODULE).
 
--spec get(uri() | [uri()]) -> {ok, http_reply()} | {error, error_reason()}.
+-spec get(uri()) -> {ok, http_reply()} | {error, error_reason()}.
 get(URI) ->
     get(URI, #{}).
 
@@ -93,7 +88,7 @@ get(URI) ->
 get(URI, Opts) ->
     req(get, URI, Opts).
 
--spec delete(uri() | [uri()]) -> {ok, http_reply()} | {error, error_reason()}.
+-spec delete(uri()) -> {ok, http_reply()} | {error, error_reason()}.
 delete(URI) ->
     delete(URI, #{}).
 
@@ -140,17 +135,10 @@ proxy_status(_) -> 502.
 %%%===================================================================
 -spec req(get | delete | {post, iodata()}, uri(), req_opts()) ->
                  {ok, http_reply()} | {error, error_reason()}.
-req(Method, URI0, Opts) when is_map(URI0), map_size(URI0) > 0 ->
+req(Method, URI0, Opts) ->
     URI = format_uri_map(URI0),
     Host = maps:get(host, URI),
     Port = maps:get(port, URI, 80),
-    Path = maps:get(path, URI, ""),
-    Scheme = format_scheme(maps:get(scheme, URI)),
-    Query = maps:get(query, URI, ""),
-    UserInfo = maps:get(userinfo, URI, ""),
-    req(Method, {Scheme, UserInfo, Host, Port, Path, Query}, Opts);
-
-req(Method, {Scheme, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
                    {abs, AbsTime} -> AbsTime;
                    Timeout -> hapi_misc:current_time() + Timeout
@@ -160,13 +148,14 @@ req(Method, {Scheme, _UserInfo, Host, Port, Path, Query} = URI, Opts) ->
     RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
     Hdrs = make_headers(URI, Opts),
-    Req = case Method of
-              {post, Body} -> {post, Scheme, Path, Query, Hdrs, Body};
-              _ -> {Method, Scheme, Path, Query, Hdrs}
-          end,
-    req(Req, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}).
+    Req0 = #{uri => URI, headers => Hdrs},
+    Req1 = case Method of
+               {post, Body} -> Req0#{method => post, body => Body};
+               _ -> Req0#{method => Method}
+           end,
+    req(Req1, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}).
 
--spec req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
+-spec req(req(), host(), [inet | inet6, ...], inet:port_number(),
           hapi_misc:millisecs(), timeout(), retry_policy()) ->
           {ok, http_reply()} | {error, error_reason()}.
 req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries) ->
@@ -178,7 +167,7 @@ req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries) ->
             retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout, Retries, Ret)
     end.
 
--spec retry_req(req(), http_uri:host(), [inet | inet6, ...], inet:port_number(),
+-spec retry_req(req(), host(), [inet | inet6, ...], inet:port_number(),
                 hapi_misc:millisecs(), timeout(), retry_policy(),
                 {ok, http_reply()} | {error, error_reason()}) ->
           {ok, http_reply()} | {error, error_reason()}.
@@ -204,14 +193,13 @@ retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout,
 
 -spec req(req(), [addr_family()], inet:port_number(), hapi_misc:millisecs(), timeout(), error_reason()) ->
           {ok, http_reply()} | {error, error_reason()}.
-req(Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
+req(#{uri := #{scheme := Scheme}} = Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
     ReqDeadLine = deadline_per_request(DeadLine, ReqTimeout, length(Addrs) + 1),
     case hapi_misc:timeout(ReqDeadLine) of
         Timeout when Timeout > 0 ->
-            Scheme = element(2, Req),
             Transport = case Scheme of
-                http -> tcp;
-                https -> tls
+                "http" -> tcp;
+                "https" -> tls
             end,
             ?LOG_DEBUG("Performing ~s to ~p://~s:~B (timeout: ~.3fs)",
                        [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000]),
@@ -257,12 +245,12 @@ req(AddrPort, Req, ConnPid, MRef, DeadLine) ->
     Timeout = hapi_misc:timeout(DeadLine),
     ReqOpts = #{reply_to => self()},
     StreamRef = case Req of
-                    {get, _, Path, Query, Hdrs} ->
-                        gun:get(ConnPid, Path ++ Query, Hdrs, ReqOpts);
-                    {post, _, Path, Query, Hdrs, Body} ->
-                        gun:post(ConnPid, Path ++ Query, Hdrs, Body, ReqOpts);
-                    {delete, _, Path, Query, Hdrs} ->
-                        gun:delete(ConnPid, Path ++ Query, Hdrs, ReqOpts)
+                    #{method := get, uri := URI, headers := Hdrs} ->
+                        gun:get(ConnPid, path_query(URI), Hdrs, ReqOpts);
+                    #{method := post, uri := URI, headers := Hdrs, body := Body} ->
+                        gun:post(ConnPid, path_query(URI), Hdrs, Body, ReqOpts);
+                    #{method := delete, uri := URI, headers := Hdrs} ->
+                        gun:delete(ConnPid, path_query(URI), Hdrs, ReqOpts)
                 end,
     receive
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->
@@ -326,7 +314,7 @@ need_retry(_) ->
     true.
 
 -spec make_headers(uri(), hapi:req_opts()) -> headers().
-make_headers({_Scheme, _UserInfo, Host, _Port, _Path, _Query}, ReqOpts) ->
+make_headers(#{host := Host}, ReqOpts) ->
     Hdrs1 = maps:get(headers, ReqOpts, []),
     Hdrs2 = case maps:find(auth, ReqOpts) of
                 {ok, #{type := basic,
@@ -343,8 +331,7 @@ make_headers({_Scheme, _UserInfo, Host, _Port, _Path, _Query}, ReqOpts) ->
             end,
     [{<<"host">>, unicode:characters_to_binary(Host)} | Hdrs3].
 
-use_pool(Req) ->
-    Hdrs = element(5, Req),
+use_pool(#{headers := Hdrs}) ->
     case lists:keyfind(<<"connection">>, 1, Hdrs) of
         {_, <<"keep-alive">>} -> true;
         _ -> false
@@ -353,7 +340,7 @@ use_pool(Req) ->
 %%%-------------------------------------------------------------------
 %%% DNS lookup
 %%%-------------------------------------------------------------------
--spec lookup(http_uri:host(), [inet | inet6, ...], hapi_misc:millisecs()) ->
+-spec lookup(host(), [inet | inet6, ...], hapi_misc:millisecs()) ->
           {ok, [addr_family(), ...]} | {error, {dns, inet_error_reason()}}.
 lookup(Host, Families, DeadLine) ->
     case inet:parse_address(Host) of
@@ -428,8 +415,8 @@ format_family(inet) -> "IPv4";
 format_family(inet6) -> "IPv6".
 
 -spec format_method(req()) -> string().
-format_method(Req) ->
-    string:uppercase(atom_to_list(element(1, Req))).
+format_method(#{method := Method}) ->
+    string:uppercase(atom_to_list(Method)).
 
 -spec format(io:format(), list()) -> string().
 format(Fmt, Args) ->
@@ -471,8 +458,6 @@ transport_opts(tcp, Family) ->
      {send_timeout_close, true},
      Family].
 
--spec format_scheme(unicode:chardata()) -> scheme().
-format_scheme("http") -> http;
-format_scheme(<<"http">>) -> http;
-format_scheme("https") -> https;
-format_scheme(<<"https">>) -> https.
+-spec path_query(uri()) -> string().
+path_query(URI) ->
+    uri_string:recompose(maps:without([scheme, host, port, userinfo], URI)).
