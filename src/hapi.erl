@@ -24,6 +24,7 @@
 -export([get/1, get/2]).
 -export([delete/1, delete/2]).
 -export([post/1, post/2, post/3]).
+-export([put/1, put/2, put/3]).
 -export([format_error/1]).
 -export([proxy_status/1]).
 
@@ -52,7 +53,7 @@
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type endpoint() :: {inet:ip_address(), inet:port_number()}.
 -type headers() :: [{binary(), binary()}].
--type method() :: get | post | delete.
+-type method() :: get | post | delete | put.
 -type req() :: #{method := method(), uri := uri(), headers := headers(), body => iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type auth() :: #{type := basic,
@@ -111,6 +112,21 @@ post(URI, Body) ->
 post(URI, Body, Opts) ->
     req({post, Body}, URI, Opts).
 
+-spec put({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
+put({URI, Body}) ->
+    put(URI, Body, #{}).
+
+-spec put(uri(), iodata()) -> {ok, http_reply()} | {error, error_reason()};
+    ({uri(), iodata()}, req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+put({URI, Body}, Opts) ->
+    put(URI, Body, Opts);
+put(URI, Body) ->
+    put(URI, Body, #{}).
+
+-spec put(uri(), iodata(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+put(URI, Body, Opts) ->
+    req({put, Body}, URI, Opts).
+
 -spec format_error(error_reason()) -> string().
 format_error({dns, Reason}) ->
     format("DNS lookup failed: ~s", [format_inet_error(Reason)]);
@@ -133,7 +149,7 @@ proxy_status(_) -> 502.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec req(get | delete | {post, iodata()}, uri(), req_opts()) ->
+-spec req(get | delete | {post, iodata()} | {put, iodata()}, uri(), req_opts()) ->
                  {ok, http_reply()} | {error, error_reason()}.
 req(Method, URI0, Opts) ->
     URI = format_uri_map(URI0),
@@ -150,7 +166,8 @@ req(Method, URI0, Opts) ->
     Hdrs = make_headers(URI, Opts),
     Req0 = #{uri => URI, headers => Hdrs},
     Req1 = case Method of
-               {post, Body} -> Req0#{method => post, body => Body};
+               {HTTPMethod, Body} when HTTPMethod == post; HTTPMethod == put ->
+                   Req0#{method => HTTPMethod, body => Body};
                _ -> Req0#{method => Method}
            end,
     req(Req1, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}).
@@ -250,7 +267,9 @@ req(AddrPort, Req, ConnPid, MRef, DeadLine) ->
                     #{method := post, uri := URI, headers := Hdrs, body := Body} ->
                         gun:post(ConnPid, path_query(URI), Hdrs, Body, ReqOpts);
                     #{method := delete, uri := URI, headers := Hdrs} ->
-                        gun:delete(ConnPid, path_query(URI), Hdrs, ReqOpts)
+                        gun:delete(ConnPid, path_query(URI), Hdrs, ReqOpts);
+                    #{method := put, uri := URI, headers := Hdrs, body := Body} ->
+                        gun:put(ConnPid, path_query(URI), Hdrs, Body, ReqOpts)
                 end,
     receive
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->
