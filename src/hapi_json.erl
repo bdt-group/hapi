@@ -23,6 +23,7 @@
 -export([get/2, get/3]).
 -export([delete/2, delete/3]).
 -export([post/3, post/4]).
+-export([put/3, put/4]).
 -export([decode/2]).
 -export([encode/1]).
 -export([format_error/1]).
@@ -77,6 +78,17 @@ post(URI, JSON, Validator) ->
                   {ok, T | no_content} | {error, error_reason()}.
 post(URI, JSON, Validator, Opts) ->
     Ret = hapi:post(URI, encode(JSON), set_headers(post, Opts)),
+    process_response(Ret, Validator).
+
+-spec put(hapi:uri(), jiffy:json_value(), yval:validator(T)) ->
+                  {ok, T | no_content} | {error, error_reason()}.
+put(URI, JSON, Validator) ->
+    put(URI, JSON, Validator, #{}).
+
+-spec put(hapi:uri(), jiffy:json_value(), yval:validator(T), hapi:req_opts()) ->
+                  {ok, T | no_content} | {error, error_reason()}.
+put(URI, JSON, Validator, Opts) ->
+    Ret = hapi:put(URI, encode(JSON), set_headers(put, Opts)),
     process_response(Ret, Validator).
 
 -spec decode(binary(), yval:validator(T)) -> {ok, T | no_content} | {error, json_error_reason()}.
@@ -166,7 +178,7 @@ set_headers(Method, ReqOpts) ->
     Hdrs = maps:get(headers, ReqOpts, []),
     Hdrs1 = [{<<"accept">>, <<"application/json, application/problem+json">>}|Hdrs],
     Hdrs2 = case Method of
-                post ->
+                Method when Method == post; Method == put ->
                     [{<<"content-type">>, <<"application/json">>}|Hdrs1];
                 _ ->
                     Hdrs1
