@@ -432,10 +432,6 @@ format_inet_error(Reason) when is_atom(Reason) ->
 format_inet_error(Reason) ->
     lists:flatten(io_lib:format("unexpected error: ~p", [Reason])).
 
--spec format_family(inet | inet6) -> string().
-format_family(inet) -> "IPv4";
-format_family(inet6) -> "IPv6".
-
 -spec format_method(req()) -> string().
 format_method(#{method := Method}) ->
     string:uppercase(atom_to_list(Method)).
@@ -443,6 +439,10 @@ format_method(#{method := Method}) ->
 -spec format(io:format(), list()) -> string().
 format(Fmt, Args) ->
     lists:flatten(io_lib:format(Fmt, Args)).
+
+-spec format_headers(headers()) -> binary().
+format_headers(Headers) ->
+    [[N, <<": ">>, V, <<"\r\n">>] || {N, V} <- Headers].
 
 -spec prep_reason(term()) -> error_reason().
 prep_reason({shutdown, Reason}) ->
@@ -489,8 +489,9 @@ trace_request(#{uri := URI, headers := Hdrs} = Req, #{trace := {domain, Domain}}
     ReqId = io_lib:format("<~w+~w>", [erlang:system_time(seconds),
                                       erlang:unique_integer([monotonic])]),
     Body = maps:get(body, Req, <<>>),
-    ?LOG_DEBUG("TRACE REQUEST [~ts] >>>>>>>> METHOD: '~ts'; URI: '~ts'; HEADERS: '~p'; BODY: '~ts'",
-               [ReqId, format_method(Req), uri_string:recompose(URI), Hdrs, Body],
+    ?LOG_DEBUG("TRACE REQUEST [~ts] >>>>>>>> "
+               "METHOD: '~ts'; URI: '~ts'; HEADERS: '~ts'; BODY: '~ts'",
+               [ReqId, format_method(Req), uri_string:recompose(URI), format_headers(Hdrs), Body],
                #{domain => [Domain]}),
     ReqId;
 trace_request(_, _) ->
@@ -498,8 +499,8 @@ trace_request(_, _) ->
 
 -spec trace_response(req_id(), {ok, http_reply()} | {error, error_reason()}, req_opts()) -> _.
 trace_response(ReqId, {ok, {Status, Hdrs, Body}}, #{trace := {domain, Domain}}) ->
-    ?LOG_DEBUG("TRACE RESPONSE [~ts] <<<<<<<< STATUS: '~w'; HEADERS: '~p'; BODY: '~ts'",
-               [ReqId, Status, Hdrs, Body],
+    ?LOG_DEBUG("TRACE RESPONSE [~ts] <<<<<<<< STATUS: '~w'; HEADERS: '~ts'; BODY: '~ts'",
+               [ReqId, Status, format_headers(Hdrs), Body],
                #{domain => [Domain]});
 trace_response(ReqId, {error, Reason}, #{trace := {domain, Domain}}) ->
     ?LOG_DEBUG("TRACE RESPONSE [~ts] <<<<<<<< ERROR: ~ts",
