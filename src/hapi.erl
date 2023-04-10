@@ -156,7 +156,7 @@ proxy_status(_) -> 502.
 req(Method, URI0, Opts) ->
     URI = format_uri_map(URI0),
     Host = maps:get(host, URI),
-    Port = maps:get(port, URI, 80),
+    Port = maps:get(port, URI, default_port(URI)),
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
                    {abs, AbsTime} -> AbsTime;
                    Timeout -> hapi_misc:current_time() + Timeout
@@ -508,3 +508,9 @@ trace_response(ReqId, {error, Reason}, #{trace := {domain, Domain}}) ->
                #{domain => [Domain]});
 trace_response(_, _, _) ->
     ok.
+
+-spec default_port(uri()) -> integer().
+default_port(#{scheme := "https"}) ->
+    443;
+default_port(_) ->
+    80.
