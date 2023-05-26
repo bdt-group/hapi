@@ -24,6 +24,7 @@
 -export([get/1, get/2]).
 -export([delete/1, delete/2]).
 -export([post/1, post/2, post/3]).
+-export([put/1, put/2, put/3]).
 -export([format_error/1]).
 -export([proxy_status/1]).
 
@@ -45,6 +46,7 @@
                       auth => auth(),
                       headers => headers(),
                       use_pool => boolean(),
+                      trace => false | {domain, atom()},
                       ip_family => [inet | inet6, ...]}.
 -type retry_policy() :: {hapi_misc:millisecs(), non_neg_integer(), non_neg_integer() | infinity}.
 -type host() :: string().
@@ -52,7 +54,7 @@
 -type addr_family() :: {inet:ip_address(), inet | inet6}.
 -type endpoint() :: {inet:ip_address(), inet:port_number()}.
 -type headers() :: [{binary(), binary()}].
--type method() :: get | post | delete.
+-type method() :: get | post | delete | put.
 -type req() :: #{method := method(), uri := uri(), headers := headers(), body => iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type auth() :: #{type := basic,
@@ -63,6 +65,7 @@
                         {http, inet_error_reason()} |
                         {system_error, term()} |
                         {exit, term()}.
+-type req_id() :: string().
 
 -export_type([uri/0, error_reason/0, http_reply/0, req_opts/0, method/0, headers/0]).
 
@@ -111,6 +114,21 @@ post(URI, Body) ->
 post(URI, Body, Opts) ->
     req({post, Body}, URI, Opts).
 
+-spec put({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
+put({URI, Body}) ->
+    put(URI, Body, #{}).
+
+-spec put(uri(), iodata()) -> {ok, http_reply()} | {error, error_reason()};
+    ({uri(), iodata()}, req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+put({URI, Body}, Opts) ->
+    put(URI, Body, Opts);
+put(URI, Body) ->
+    put(URI, Body, #{}).
+
+-spec put(uri(), iodata(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+put(URI, Body, Opts) ->
+    req({put, Body}, URI, Opts).
+
 -spec format_error(error_reason()) -> string().
 format_error({dns, Reason}) ->
     format("DNS lookup failed: ~s", [format_inet_error(Reason)]);
@@ -133,12 +151,12 @@ proxy_status(_) -> 502.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec req(get | delete | {post, iodata()}, uri(), req_opts()) ->
+-spec req(get | delete | {post, iodata()} | {put, iodata()}, uri(), req_opts()) ->
                  {ok, http_reply()} | {error, error_reason()}.
 req(Method, URI0, Opts) ->
     URI = format_uri_map(URI0),
     Host = maps:get(host, URI),
-    Port = maps:get(port, URI, 80),
+    Port = maps:get(port, URI, default_port(URI)),
     DeadLine = case maps:get(timeout, Opts, ?REQ_TIMEOUT) of
                    {abs, AbsTime} -> AbsTime;
                    Timeout -> hapi_misc:current_time() + Timeout
@@ -150,10 +168,14 @@ req(Method, URI0, Opts) ->
     Hdrs = make_headers(URI, Opts),
     Req0 = #{uri => URI, headers => Hdrs},
     Req1 = case Method of
-               {post, Body} -> Req0#{method => post, body => Body};
+               {HTTPMethod, Body} when HTTPMethod == post; HTTPMethod == put ->
+                   Req0#{method => HTTPMethod, body => Body};
                _ -> Req0#{method => Method}
            end,
-    req(Req1, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}).
+    ReqId = trace_request(Req1, Opts),
+    Resp = req(Req1, Host, Families, Port, DeadLine, ReqTimeout, {RetryTimeout, 0, MaxRetries}),
+    trace_response(ReqId, Resp, Opts),
+    Resp.
 
 -spec req(req(), host(), [inet | inet6, ...], inet:port_number(),
           hapi_misc:millisecs(), timeout(), retry_policy()) ->
@@ -250,7 +272,9 @@ req(AddrPort, Req, ConnPid, MRef, DeadLine) ->
                     #{method := post, uri := URI, headers := Hdrs, body := Body} ->
                         gun:post(ConnPid, path_query(URI), Hdrs, Body, ReqOpts);
                     #{method := delete, uri := URI, headers := Hdrs} ->
-                        gun:delete(ConnPid, path_query(URI), Hdrs, ReqOpts)
+                        gun:delete(ConnPid, path_query(URI), Hdrs, ReqOpts);
+                    #{method := put, uri := URI, headers := Hdrs, body := Body} ->
+                        gun:put(ConnPid, path_query(URI), Hdrs, Body, ReqOpts)
                 end,
     receive
         {gun_response, ConnPid, StreamRef, fin, Status, Headers} ->
@@ -360,8 +384,6 @@ lookup(Host, Families, DeadLine) ->
           {ok, [addr_family(), ...]} | {error, {dns, inet_error_reason()}}.
 lookup([{Host, Family}|Addrs], DeadLine, Res, Err) ->
     Timeout = min(?DNS_TIMEOUT, hapi_misc:timeout(DeadLine)),
-    ?LOG_DEBUG("Looking up ~s address for ~ts",
-               [format_family(Family), Host]),
     case inet:gethostbyname(Host, Family, Timeout) of
         {ok, HostEntry} ->
             Addrs1 = host_entry_to_addrs(HostEntry),
@@ -415,10 +437,6 @@ format_inet_error(Reason) when is_atom(Reason) ->
 format_inet_error(Reason) ->
     lists:flatten(io_lib:format("unexpected error: ~p", [Reason])).
 
--spec format_family(inet | inet6) -> string().
-format_family(inet) -> "IPv4";
-format_family(inet6) -> "IPv6".
-
 -spec format_method(req()) -> string().
 format_method(#{method := Method}) ->
     string:uppercase(atom_to_list(Method)).
@@ -426,6 +444,10 @@ format_method(#{method := Method}) ->
 -spec format(io:format(), list()) -> string().
 format(Fmt, Args) ->
     lists:flatten(io_lib:format(Fmt, Args)).
+
+-spec format_headers(headers()) -> binary().
+format_headers(Headers) ->
+    [[N, <<": ">>, V, <<"\r\n">>] || {N, V} <- Headers].
 
 -spec prep_reason(term()) -> error_reason().
 prep_reason({shutdown, Reason}) ->
@@ -466,3 +488,34 @@ transport_opts(tcp, Family) ->
 -spec path_query(uri()) -> string().
 path_query(URI) ->
     uri_string:recompose(maps:without([scheme, host, port, userinfo], URI)).
+
+-spec trace_request(req(), req_opts()) -> req_id().
+trace_request(#{uri := URI, headers := Hdrs} = Req, #{trace := {domain, Domain}}) ->
+    ReqId = io_lib:format("<~w+~w>", [erlang:system_time(seconds),
+                                      erlang:unique_integer([monotonic])]),
+    Body = maps:get(body, Req, <<>>),
+    ?LOG_DEBUG("TRACE REQUEST [~ts] >>>>>>>> "
+               "METHOD: '~ts'; URI: '~ts'; HEADERS: '~ts'; BODY: '~ts'",
+               [ReqId, format_method(Req), uri_string:recompose(URI), format_headers(Hdrs), Body],
+               #{domain => [Domain]}),
+    ReqId;
+trace_request(_, _) ->
+    "".
+
+-spec trace_response(req_id(), {ok, http_reply()} | {error, error_reason()}, req_opts()) -> _.
+trace_response(ReqId, {ok, {Status, Hdrs, Body}}, #{trace := {domain, Domain}}) ->
+    ?LOG_DEBUG("TRACE RESPONSE [~ts] <<<<<<<< STATUS: '~w'; HEADERS: '~ts'; BODY: '~ts'",
+               [ReqId, Status, format_headers(Hdrs), Body],
+               #{domain => [Domain]});
+trace_response(ReqId, {error, Reason}, #{trace := {domain, Domain}}) ->
+    ?LOG_DEBUG("TRACE RESPONSE [~ts] <<<<<<<< ERROR: ~ts",
+               [ReqId, format_error(Reason)],
+               #{domain => [Domain]});
+trace_response(_, _, _) ->
+    ok.
+
+-spec default_port(uri()) -> integer().
+default_port(#{scheme := "https"}) ->
+    443;
+default_port(_) ->
+    80.

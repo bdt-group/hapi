@@ -86,6 +86,9 @@ The following types are exported from `hapi` module:
     cleared with all its pending requests being discarded with the corresponding
     error.
 
+  - `trace: false | {domain, atom()}`: Flag to enable debug logging of request-response pair.
+    Disabled by default. If set, will emit log messages to specified domain.
+
 - `method() :: get | post | delete`: an HTTP method.
 
 - `headers()`: HTTP headers represented as `[{binary(), binary()}]`.
