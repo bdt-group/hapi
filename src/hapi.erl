@@ -339,21 +339,26 @@ need_retry(_) ->
 
 -spec make_headers(uri(), hapi:req_opts()) -> headers().
 make_headers(#{host := Host}, ReqOpts) ->
-    Hdrs1 = maps:get(headers, ReqOpts, []),
-    Hdrs2 = case maps:find(auth, ReqOpts) of
-                {ok, #{type := basic,
-                       username := User,
-                       password := Pass}} ->
-                    Authz = base64:encode(iolist_to_binary([User, $:, Pass])),
-                    [{<<"authorization">>, <<"Basic ", Authz/binary>>}|Hdrs1];
-                error ->
-                    Hdrs1
-            end,
-    Hdrs3 = case maps:get(use_pool, ReqOpts, false) of
-                true -> [{<<"connection">>, <<"keep-alive">>}|Hdrs2];
-                false -> [{<<"connection">>, <<"close">>}|Hdrs2]
-            end,
-    [{<<"host">>, unicode:characters_to_binary(Host)} | Hdrs3].
+    Hdrs = [{string:lowercase(K),V} || {K,V} <- maps:get(headers, ReqOpts, [])],
+    F = fun(Name, Acc) ->
+            case proplists:is_defined(Name, Acc) of
+                true -> Acc;
+                false -> set_default_header(Name, Acc, ReqOpts, Host)
+            end
+        end,
+    lists:foldl(F, Hdrs, [<<"authorization">>, <<"connection">>, <<"host">>]).
+
+set_default_header(<<"authorization">>, Hdrs, #{auth := #{type := basic} = A}, _Host) ->
+    AStr = iolist_to_binary([maps:get(username, A), $:, maps:get(password, A)]),
+    [{<<"authorization">>, <<"Basic ", (base64:encode(AStr))/binary>>}|Hdrs];
+set_default_header(<<"authorization">>, Hdrs, _ReqOpts, _Host) ->
+    Hdrs;
+set_default_header(<<"connection">>, Hdrs, #{use_pool := true}, _Host) ->
+    [{<<"connection">>, <<"keep-alive">>}|Hdrs];
+set_default_header(<<"connection">>, Hdrs, _ReqOpts, _Host) ->
+    [{<<"connection">>, <<"close">>}|Hdrs];
+set_default_header(<<"host">>, Hdrs, _ReqOpts, Host) ->
+    [{<<"host">>, unicode:characters_to_binary(Host)} | Hdrs].
 
 use_pool(#{headers := Hdrs}) ->
     case lists:keyfind(<<"connection">>, 1, Hdrs) of
