@@ -329,7 +329,13 @@ make_headers(#{host := Host}, ReqOpts) ->
                 true -> [{<<"connection">>, <<"keep-alive">>}|Hdrs2];
                 false -> [{<<"connection">>, <<"close">>}|Hdrs2]
             end,
-    [{<<"host">>, unicode:characters_to_binary(Host)} | Hdrs3].
+    F = fun({K,_}) -> lists:member(K, [<<"host">>, <<"Host">>, <<"HOST">>]) end,
+    case lists:filter(F, Hdrs1) of
+        [] ->
+            [{<<"host">>, unicode:characters_to_binary(Host)} | Hdrs3];
+        [_|_] ->
+            Hdrs3
+    end.
 
 use_pool(#{headers := Hdrs}) ->
     case lists:keyfind(<<"connection">>, 1, Hdrs) of
