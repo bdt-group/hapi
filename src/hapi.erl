@@ -338,12 +338,16 @@ need_retry(_) ->
     true.
 
 -spec make_headers(uri(), hapi:req_opts()) -> headers().
-make_headers(#{host := Host}, ReqOpts) ->
+make_headers(#{host := Host} = URI, ReqOpts) ->
+    Host1 = case URI of
+                #{port := Port} -> Host++":"++integer_to_list(Port);
+                _ -> Host
+            end,
     Hdrs = [{string:lowercase(K),V} || {K,V} <- maps:get(headers, ReqOpts, [])],
     F = fun(Name, Acc) ->
             case proplists:is_defined(Name, Acc) of
                 true -> Acc;
-                false -> set_default_header(Name, Acc, ReqOpts, Host)
+                false -> set_default_header(Name, Acc, ReqOpts, Host1)
             end
         end,
     lists:foldl(F, Hdrs, [<<"authorization">>, <<"connection">>, <<"host">>]).
