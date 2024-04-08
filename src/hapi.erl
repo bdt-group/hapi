@@ -244,22 +244,13 @@ req(#{uri := #{scheme := Scheme}} = Req, [{Addr, Family}|Addrs], Port, DeadLine,
                           end,
                     erlang:demonitor(MRef),
                     gun:flush(ConnPid),
-                    case Ret of
-                        {ok, _} = OK ->
-                            OK;
-                        {error, {exit, _}} ->
-                            Ret;
-                        {error, NewReason} ->
-                            req(Req, Addrs, Port, DeadLine, ReqTimeout, NewReason)
-                    end;
+                    Ret;
                 {error, Why} ->
-                    req(Req, Addrs, Port, DeadLine, ReqTimeout, prep_reason(Why))
+                    {error, {prep_reason(Why)}}
             end;
         _ ->
             {error, Reason}
-    end;
-req(_, [], _, _, _, Reason) ->
-    {error, Reason}.
+    end.
 
 -spec req(endpoint(), req(), pid(), reference(), hapi_misc:millisecs()) ->
           {ok, http_reply()} | {error, error_reason()}.
@@ -448,7 +439,7 @@ format_method(#{method := Method}) ->
 format(Fmt, Args) ->
     lists:flatten(io_lib:format(Fmt, Args)).
 
--spec format_headers(headers()) -> binary().
+-spec format_headers(headers()) -> iolist().
 format_headers(Headers) ->
     [[N, <<": ">>, V, <<"\r\n">>] || {N, V} <- Headers].
 
