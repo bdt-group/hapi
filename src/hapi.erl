@@ -246,7 +246,7 @@ req(#{uri := #{scheme := Scheme}} = Req, [{Addr, Family}|Addrs], Port, DeadLine,
                     gun:flush(ConnPid),
                     Ret;
                 {error, Why} ->
-                    {error, {prep_reason(Why)}}
+                    {error, prep_reason(Why)}
             end;
         _ ->
             {error, Reason}
