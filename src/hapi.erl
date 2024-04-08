@@ -34,7 +34,7 @@
 -define(DNS_TIMEOUT, timer:seconds(5)).
 -define(TCP_SEND_TIMEOUT, timer:seconds(5)).
 -define(REQ_TIMEOUT, timer:seconds(30)).
--define(MAX_RETRIES, infinity).
+-define(MAX_RETRIES, 0).
 -define(RETRY_TIMEOUT, timer:seconds(1)).
 
 -type uri() :: uri_string:uri_map().
@@ -161,7 +161,7 @@ req(Method, URI0, Opts) ->
                    {abs, AbsTime} -> AbsTime;
                    Timeout -> hapi_misc:current_time() + Timeout
                end,
-    ReqTimeout = maps:get(timeout_per_request, Opts, infinity),
+    ReqTimeout = maps:get(timeout_per_request, Opts, (DeadLine - hapi_misc:current_time())),
     MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
     RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
