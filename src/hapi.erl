@@ -47,6 +47,7 @@
                       headers => headers(),
                       use_pool => boolean(),
                       trace => false | {domain, atom()},
+                      protocols => [protocol()],
                       ip_family => [inet | inet6, ...]}.
 -type retry_policy() :: {hapi_misc:millisecs(), non_neg_integer(), non_neg_integer() | infinity}.
 -type host() :: string().
@@ -55,7 +56,8 @@
 -type endpoint() :: {inet:ip_address(), inet:port_number()}.
 -type headers() :: [{binary(), binary()}].
 -type method() :: get | post | delete | put.
--type req() :: #{method := method(), uri := uri(), headers := headers(), body => iodata()}.
+-type protocol() :: http | http2.
+-type req() :: #{method := method(), uri := uri(), headers := headers(), protocols := [protocol()], body => iodata()}.
 -type http_reply() :: {non_neg_integer(), headers(), binary()}.
 -type auth() :: #{type := basic,
                   username := iodata(),
@@ -165,8 +167,9 @@ req(Method, URI0, Opts) ->
     MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
     RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
+    Protocols = maps:get(protocols, Opts, [http2, http]),
     Hdrs = make_headers(URI, Opts),
-    Req0 = #{uri => URI, headers => Hdrs},
+    Req0 = #{uri => URI, headers => Hdrs, protocols => Protocols},
     Req1 = case Method of
                {HTTPMethod, Body} when HTTPMethod == post; HTTPMethod == put ->
                    Req0#{method => HTTPMethod, body => Body};
@@ -215,7 +218,7 @@ retry_req(Req, Host, Families, Port, DeadLine, ReqTimeout,
 
 -spec req(req(), [addr_family()], inet:port_number(), hapi_misc:millisecs(), timeout(), error_reason()) ->
           {ok, http_reply()} | {error, error_reason()}.
-req(#{uri := #{scheme := Scheme}} = Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
+req(#{uri := #{scheme := Scheme}, protocols := Protocols} = Req, [{Addr, Family}|Addrs], Port, DeadLine, ReqTimeout, Reason) ->
     ReqDeadLine = deadline_per_request(DeadLine, ReqTimeout, length(Addrs) + 1),
     case hapi_misc:timeout(ReqDeadLine) of
         Timeout when Timeout > 0 ->
@@ -227,6 +230,7 @@ req(#{uri := #{scheme := Scheme}} = Req, [{Addr, Family}|Addrs], Port, DeadLine,
                        [format_method(Req), Scheme, hapi_misc:format_addr(Addr), Port, Timeout/1000]),
             case open({Addr, Port}, #{transport => Transport,
                                       transport_opts => transport_opts(Transport, Family),
+                                      protocols => Protocols,
                                       retry => 0}, Req, ReqDeadLine) of
                 {ok, ConnPid} ->
                     MRef = erlang:monitor(process, ConnPid),
