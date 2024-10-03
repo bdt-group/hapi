@@ -167,7 +167,7 @@ req(Method, URI0, Opts) ->
     MaxRetries = maps:get(max_retries, Opts, ?MAX_RETRIES),
     RetryTimeout = maps:get(retry_base_timeout, Opts, ?RETRY_TIMEOUT),
     Families = maps:get(ip_family, Opts, [inet]),
-    Protocols = maps:get(protocols, Opts, [http2, http]),
+    Protocols = maps:get(protocols, Opts, [http]),
     Hdrs = make_headers(URI, Opts),
     Req0 = #{uri => URI, headers => Hdrs, protocols => Protocols},
     Req1 = case Method of
