@@ -143,7 +143,7 @@ proxy_status(Reason) -> hapi:proxy_status(Reason).
 -spec process_response({ok, hapi:http_reply()} | {error, hapi:error_reason()},
                        yval:validator(T)) ->
                               {ok, T} | {error, error_reason()}.
-process_response({ok, {200, _, Data}}, Validator) ->
+process_response({ok, {Code, _, Data}}, Validator) when Code == 200; Code == 201 ->
     decode(Data, Validator);
 process_response({ok, {204, _, _}}, _) ->
     {ok, no_content};
