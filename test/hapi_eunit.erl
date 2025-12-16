@@ -84,6 +84,8 @@ delete_test() ->
     URI = make_uri("/empty-json"),
     ?assertMatch({ok, []},
                  hapi_json:delete(URI, yval:options(#{}))),
+    ?assertMatch({ok, []},
+                 hapi_json:delete(URI, #{}, yval:options(#{}))),
     assert_mailbox().
 
 delete_no_content_test() ->

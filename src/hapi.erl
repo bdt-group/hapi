@@ -22,7 +22,7 @@
 %% API
 -export([start/0, stop/0]).
 -export([get/1, get/2]).
--export([delete/1, delete/2]).
+-export([delete/1, delete/2, delete/3]).
 -export([post/1, post/2, post/3]).
 -export([put/1, put/2, put/3]).
 -export([format_error/1]).
@@ -99,6 +99,10 @@ delete(URI) ->
 delete(URI, Opts) ->
     req(delete, URI, Opts).
 
+-spec delete(uri(), iodata(), req_opts()) -> {ok, http_reply()} | {error, error_reason()}.
+delete(URI, Body, Opts) ->
+    req({delete, Body}, URI, Opts).
+
 -spec post({uri(), iodata()}) -> {ok, http_reply()} | {error, error_reason()}.
 post({URI, Body}) ->
     post(URI, Body, #{}).
@@ -151,7 +155,7 @@ proxy_status(_) -> 502.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec req(get | delete | {post, iodata()} | {put, iodata()}, uri(), req_opts()) ->
+-spec req(get | delete | {post, iodata()} | {put, iodata()} | delete | {delete, iodata()}, uri(), req_opts()) ->
                  {ok, http_reply()} | {error, error_reason()}.
 req(Method, URI0, Opts) ->
     URI = format_uri_map(URI0),
@@ -168,7 +172,7 @@ req(Method, URI0, Opts) ->
     Hdrs = make_headers(URI, Opts),
     Req0 = #{uri => URI, headers => Hdrs},
     Req1 = case Method of
-               {HTTPMethod, Body} when HTTPMethod == post; HTTPMethod == put ->
+               {HTTPMethod, Body} when HTTPMethod == post; HTTPMethod == put; HTTPMethod == delete ->
                    Req0#{method => HTTPMethod, body => Body};
                _ -> Req0#{method => Method}
            end,
@@ -262,6 +266,8 @@ req(AddrPort, Req, ConnPid, MRef, DeadLine) ->
                         gun:get(ConnPid, path_query(URI), Hdrs, ReqOpts);
                     #{method := post, uri := URI, headers := Hdrs, body := Body} ->
                         gun:post(ConnPid, path_query(URI), Hdrs, Body, ReqOpts);
+                    #{method := delete, uri := URI, headers := Hdrs, body := Body} -> % common idiosyncrasy
+                        gun:request(ConnPid, <<"DELETE">>, path_query(URI), Hdrs, Body, ReqOpts);
                     #{method := delete, uri := URI, headers := Hdrs} ->
                         gun:delete(ConnPid, path_query(URI), Hdrs, ReqOpts);
                     #{method := put, uri := URI, headers := Hdrs, body := Body} ->

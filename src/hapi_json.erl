@@ -21,7 +21,7 @@
 
 %% API
 -export([get/2, get/3]).
--export([delete/2, delete/3]).
+-export([delete/2, delete/3, delete/4]).
 -export([post/3, post/4]).
 -export([put/3, put/4]).
 -export([decode/2]).
@@ -67,6 +67,12 @@ delete(URI, Validator) ->
                  {ok, T | no_content} | {error, error_reason()}.
 delete(URI, Validator, Opts) ->
     Ret = hapi:delete(URI, set_headers(delete, Opts)),
+    process_response(Ret, Validator).
+
+-spec delete(hapi:uri(), jiffy:json_value(), yval:validator(T), hapi:req_opts()) ->
+                 {ok, T | no_content} | {error, error_reason()}.
+delete(URI, JSON, Validator, Opts) ->
+    Ret = hapi:delete(URI, encode(JSON), set_headers(delete, Opts, true)),
     process_response(Ret, Validator).
 
 -spec post(hapi:uri(), jiffy:json_value(), yval:validator(T)) ->
@@ -173,15 +179,15 @@ json_to_yaml({Key, Val}) ->
 json_to_yaml(Term) ->
     Term.
 
--spec set_headers(hapi:method(), hapi:req_opts()) -> hapi:req_opts().
-set_headers(Method, ReqOpts) ->
+set_headers(Method, ReqOpts) when Method == post; Method == put -> set_headers(Method, ReqOpts, true);
+set_headers(Method, ReqOpts) -> set_headers(Method, ReqOpts, false).
+
+set_headers(_, ReqOpts, HasBody) ->
     Hdrs = maps:get(headers, ReqOpts, []),
     Hdrs1 = [{<<"accept">>, <<"application/json, application/problem+json">>}|Hdrs],
-    Hdrs2 = case Method of
-                Method when Method == post; Method == put ->
-                    [{<<"content-type">>, <<"application/json">>}|Hdrs1];
-                _ ->
-                    Hdrs1
+    Hdrs2 = case HasBody of
+                true -> [{<<"content-type">>, <<"application/json">>}|Hdrs1];
+                _ ->  Hdrs1
             end,
     ReqOpts#{headers => Hdrs2}.
 
