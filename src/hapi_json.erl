@@ -179,9 +179,11 @@ json_to_yaml({Key, Val}) ->
 json_to_yaml(Term) ->
     Term.
 
+-spec set_headers(hapi:method(), hapi:req_opts()) -> hapi:req_opts().
 set_headers(Method, ReqOpts) when Method == post; Method == put -> set_headers(Method, ReqOpts, true);
 set_headers(Method, ReqOpts) -> set_headers(Method, ReqOpts, false).
 
+-spec set_headers(hapi:method(), hapi:req_opts(), boolean()) -> hapi:req_opts().
 set_headers(_, ReqOpts, HasBody) ->
     Hdrs = maps:get(headers, ReqOpts, []),
     Hdrs1 = [{<<"accept">>, <<"application/json, application/problem+json">>}|Hdrs],
