@@ -61,7 +61,7 @@ get(URI, Validator, Opts) ->
 -spec delete(hapi:uri(), yval:validator(T)) ->
                  {ok, T | no_content} | {error, error_reason()}.
 delete(URI, Validator) ->
-    get(URI, Validator, #{}).
+    delete(URI, Validator, #{}).
 
 -spec delete(hapi:uri(), yval:validator(T), hapi:req_opts()) ->
                  {ok, T | no_content} | {error, error_reason()}.
